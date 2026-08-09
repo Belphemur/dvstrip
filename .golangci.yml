@@ -3,10 +3,10 @@ version: "2"
 run:
   timeout: 5m
 
-lint:
+linters:
+  default: none
   enable:
     - errcheck
-    - gosimple
     - govet
     - ineffassign
     - staticcheck
@@ -15,12 +15,11 @@ lint:
     - revive
     - gocritic
     - goconst
-    - gofumpt
-  disable:
-    - lll
-    - wsl
+  exclusions:
+    rules:
+      - linters: [goconst]
+        path: internal/probe/fixture_test.go
 
-issues:
-  exclude-rules:
-    - path: internal/probe/fixture_test.go
-      linters: [goconst]
+formatters:
+  enable:
+    - gofumpt
