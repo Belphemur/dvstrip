@@ -98,7 +98,7 @@ func (t *Tracker) Start(key, label string, total int64) {
 		progressbar.OptionShowBytes(true),
 		progressbar.OptionShowTotalBytes(true),
 		progressbar.OptionSetPredictTime(true),
-		progressbar.OptionSetWidth(25),
+		progressbar.OptionSetWidth(15),
 		progressbar.OptionSetRenderBlankState(true),
 		progressbar.OptionThrottle(redrawInterval),
 	)

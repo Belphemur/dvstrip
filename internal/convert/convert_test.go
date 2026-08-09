@@ -3,7 +3,10 @@ package convert
 import (
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
+
+	"github.com/Belphemur/dvstrip/internal/probe"
 )
 
 func TestOutPaths(t *testing.T) {
@@ -44,6 +47,20 @@ func TestParseProgressBytes(t *testing.T) {
 	}
 	if _, ok := parseProgressBytes("total_size=not-a-number"); ok {
 		t.Error("invalid number must not match")
+	}
+}
+
+func TestBarLabel(t *testing.T) {
+	short := barLabel(probe.Info{Path: "/x/movie.mkv"}, "strip DV")
+	if short != "movie.mkv · strip DV" {
+		t.Errorf("short label = %q", short)
+	}
+	long := barLabel(probe.Info{Path: "/x/" + strings.Repeat("a", 100) + ".mkv"}, "strip DV")
+	if len(long) > 60+len(" · strip DV") {
+		t.Errorf("label not truncated: %d chars", len(long))
+	}
+	if !strings.Contains(long, "... · strip DV") {
+		t.Errorf("truncated label missing ellipsis: %q", long)
 	}
 }
 

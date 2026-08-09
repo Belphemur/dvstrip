@@ -92,6 +92,17 @@ func parseProgressBytes(line string) (int64, bool) {
 	return n, err == nil
 }
 
+// barLabel builds the per-file bar description "<basename> · <phase>",
+// truncating long release names so they don't eat the whole bar width.
+func barLabel(src probe.Info, phase string) string {
+	name := filepath.Base(src.Path)
+	const maxNameLen = 60
+	if len(name) > maxNameLen {
+		name = name[:maxNameLen-3] + "..."
+	}
+	return name + " · " + phase
+}
+
 // runFFmpeg runs ffmpeg with -nostats and, when a Progress sink is set,
 // streams machine-readable -progress output into a per-file bar keyed by the
 // source path. ffmpeg stderr is captured and attached to any returned error
@@ -115,7 +126,7 @@ func runFFmpeg(ctx context.Context, src probe.Info, o Options, label string, arg
 	if st, statErr := os.Stat(src.Path); statErr == nil {
 		total = st.Size()
 	}
-	o.Progress.Start(src.Path, label, total)
+	o.Progress.Start(src.Path, barLabel(src, label), total)
 	defer o.Progress.Finish(src.Path)
 
 	if err := cmd.Start(); err != nil {
@@ -145,7 +156,7 @@ func runSpinner(ctx context.Context, src probe.Info, o Options, label, name stri
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdout, cmd.Stderr = io.Discard, &errBuf
 
-	o.Progress.StartSpinner(src.Path, label)
+	o.Progress.StartSpinner(src.Path, barLabel(src, label))
 	defer o.Progress.Finish(src.Path)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%s: %w: %s", name, err, strings.TrimSpace(errBuf.String()))
