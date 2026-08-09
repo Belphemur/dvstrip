@@ -35,6 +35,18 @@ func TestIsTemp(t *testing.T) {
 	}
 }
 
+func TestParseProgressBytes(t *testing.T) {
+	if n, ok := parseProgressBytes("total_size=123456789"); !ok || n != 123456789 {
+		t.Errorf("total_size parse: n=%d ok=%v", n, ok)
+	}
+	if _, ok := parseProgressBytes("out_time_us=123456789"); ok {
+		t.Error("non-total_size key must not match")
+	}
+	if _, ok := parseProgressBytes("total_size=not-a-number"); ok {
+		t.Error("invalid number must not match")
+	}
+}
+
 func TestMarkerArgs(t *testing.T) {
 	args := markerArgs("dv", "hdr10")
 	want := []string{flagMetadata, "dvstrip=1", flagMetadata, "comment=dvstrip: dv -> hdr10 @ "}

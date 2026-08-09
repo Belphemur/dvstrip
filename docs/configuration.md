@@ -34,6 +34,7 @@ DVSTRIP_WORKERS=4 DVSTRIP_REPLACE=true dvstrip scan /media
 | `hdr10plus` | `--hdr10plus` | `DVSTRIP_HDR10PLUS` | `false` | Preserve HDR10+ when present (it survives stream copy regardless); log explicit fallback to HDR10 when absent. |
 | `debounce` | `--debounce` | `DVSTRIP_DEBOUNCE` | `5s` | Watch mode: how long a file must be quiet before it's processed. |
 | `full-scan` | `--full-scan` | `DVSTRIP_FULL_SCAN` | `false` | Watch mode only: enqueue the whole tree once at startup. |
+| `no-progress` | `--no-progress` | `DVSTRIP_NO_PROGRESS` | `false` | Disable per-file progress bars. Bars are **on by default**; they're forced off in `--log-json` mode so JSON stays machine-parseable. |
 | `log-level` | `--log-level` | `DVSTRIP_LOG_LEVEL` | `info` | `trace` \| `debug` \| `info` \| `warn` \| `error`. |
 | `log-json` | `--log-json` | `DVSTRIP_LOG_JSON` | `false` | Emit JSON log lines (handy for Loki/ELK/systemd-journal pipelines). |
 
@@ -49,6 +50,7 @@ p5-mode: convert
 hdr10plus: true
 full-scan: true
 debounce: 5s
+no-progress: false
 extensions: [.mkv, .mp4, .ts, .m2ts]
 log-level: info
 log-json: false

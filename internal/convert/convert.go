@@ -5,11 +5,15 @@
 package convert
 
 import (
+	"bufio"
+	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -19,10 +23,26 @@ import (
 // TempMarker identifies in-flight remux files so scan/watch ignore them.
 const TempMarker = ".dvstrip.tmp"
 
-// Options controls output naming.
+// ffmpeg argument flags used repeatedly across the conversion commands.
+const (
+	flagMap      = "-map"
+	flagMetadata = "-metadata"
+)
+
+// Progress is the sink convert reports ffmpeg progress into. It is
+// implemented by display.Tracker; nil means "no progress UI".
+type Progress interface {
+	Start(key, label string, total int64)
+	StartSpinner(key, label string)
+	Set(key string, current int64)
+	Finish(key string)
+}
+
+// Options controls output naming and progress reporting.
 type Options struct {
-	Suffix  string
-	Replace bool // overwrite the original after a verified conversion
+	Suffix   string
+	Replace  bool     // overwrite the original after a verified conversion
+	Progress Progress // nil disables per-file progress display
 }
 
 // finalPath is where the converted file ends up.
@@ -44,12 +64,6 @@ func tmpPath(in string) string {
 // IsTemp reports whether path is an in-flight remux produced by this tool.
 func IsTemp(path string) bool { return strings.Contains(path, TempMarker) }
 
-// ffmpeg argument flags used repeatedly across the conversion commands.
-const (
-	flagMap      = "-map"
-	flagMetadata = "-metadata"
-)
-
 // markerArgs stamps container-level tags so future runs recognize the file.
 func markerArgs(from, to string) []string {
 	return []string{
@@ -59,10 +73,83 @@ func markerArgs(from, to string) []string {
 	}
 }
 
+// run executes a command with output wired to the console (no progress UI).
 func run(ctx context.Context, name string, args ...string) error {
 	c := exec.CommandContext(ctx, name, args...)
 	c.Stdout, c.Stderr = os.Stdout, os.Stderr
 	return c.Run()
+}
+
+// parseProgressBytes extracts total_size=N lines from ffmpeg -progress output.
+// Pure and unit-tested.
+func parseProgressBytes(line string) (int64, bool) {
+	k, v, ok := strings.Cut(line, "=")
+	if !ok || k != "total_size" {
+		return 0, false
+	}
+	n, err := strconv.ParseInt(strings.TrimSpace(v), 10, 64)
+	return n, err == nil
+}
+
+// runFFmpeg runs ffmpeg with -nostats and, when a Progress sink is set,
+// streams machine-readable -progress output into a per-file bar keyed by the
+// source path. ffmpeg stderr is captured and attached to any returned error
+// instead of being dumped raw onto the terminal.
+func runFFmpeg(ctx context.Context, src probe.Info, o Options, label string, args ...string) error {
+	if o.Progress == nil {
+		return run(ctx, "ffmpeg", args...)
+	}
+
+	full := append([]string{"-nostats", "-progress", "pipe:1"}, args...)
+	cmd := exec.CommandContext(ctx, "ffmpeg", full...)
+
+	stdout, err := cmd.StdoutPipe()
+	if err != nil {
+		return fmt.Errorf("progress pipe: %w", err)
+	}
+	var errBuf bytes.Buffer
+	cmd.Stderr = &errBuf
+
+	var total int64
+	if st, statErr := os.Stat(src.Path); statErr == nil {
+		total = st.Size()
+	}
+	o.Progress.Start(src.Path, label, total)
+	defer o.Progress.Finish(src.Path)
+
+	if err := cmd.Start(); err != nil {
+		return fmt.Errorf("start ffmpeg: %w", err)
+	}
+
+	scanner := bufio.NewScanner(stdout)
+	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		if n, ok := parseProgressBytes(scanner.Text()); ok {
+			o.Progress.Set(src.Path, n)
+		}
+	}
+	if err := cmd.Wait(); err != nil {
+		return fmt.Errorf("ffmpeg %s: %w: %s", label, err, strings.TrimSpace(errBuf.String()))
+	}
+	return nil
+}
+
+// runSpinner runs a progress-less command (dovi_tool) under a spinner bar
+// when a Progress sink is set.
+func runSpinner(ctx context.Context, src probe.Info, o Options, label, name string, args ...string) error {
+	if o.Progress == nil {
+		return run(ctx, name, args...)
+	}
+	var errBuf bytes.Buffer
+	cmd := exec.CommandContext(ctx, name, args...)
+	cmd.Stdout, cmd.Stderr = io.Discard, &errBuf
+
+	o.Progress.StartSpinner(src.Path, label)
+	defer o.Progress.Finish(src.Path)
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("%s: %w: %s", name, err, strings.TrimSpace(errBuf.String()))
+	}
+	return nil
 }
 
 // publish verifies the remuxed tmp file and makes it visible under its final
@@ -101,7 +188,7 @@ func publish(ctx context.Context, src probe.Info, o Options) (string, error) {
 func StripDV(ctx context.Context, src probe.Info, o Options) (string, error) {
 	tmp := tmpPath(src.Path)
 	args := []string{
-		"-hide_banner", "-loglevel", "error", "-stats", "-y",
+		"-hide_banner", "-loglevel", "error", "-nostats", "-y",
 		"-i", src.Path,
 		flagMap, "0", "-c", "copy",
 		"-bsf:v", "hevc_metadata=remove_dovi=1",
@@ -109,9 +196,9 @@ func StripDV(ctx context.Context, src probe.Info, o Options) (string, error) {
 	}
 	args = append(args, markerArgs("dv", "hdr10")...)
 	args = append(args, tmp)
-	if err := run(ctx, "ffmpeg", args...); err != nil {
+	if err := runFFmpeg(ctx, src, o, "strip DV", args...); err != nil {
 		_ = os.Remove(tmp)
-		return "", fmt.Errorf("ffmpeg strip: %w", err)
+		return "", err
 	}
 	return publish(ctx, src, o)
 }
@@ -137,15 +224,16 @@ func P5(ctx context.Context, src probe.Info, o Options) (string, error) {
 	p8 := filepath.Join(dir, "p8.hevc")
 
 	// 1) extract raw annex-b HEVC video.
-	if err := run(ctx, "ffmpeg",
-		"-hide_banner", "-loglevel", "error", "-y",
+	if err := runFFmpeg(ctx, src, o, "extract HEVC",
+		"-hide_banner", "-loglevel", "error", "-nostats", "-y",
 		"-i", src.Path, flagMap, "0:v:0", "-c:v", "copy",
 		"-bsf:v", "hevc_mp4toannexb", "-f", "hevc", bl); err != nil {
 		return "", fmt.Errorf("extract hevc: %w", err)
 	}
 
 	// 2) reshape RPU: profile 5 -> 8.1, drop the enhancement layer.
-	if err := run(ctx, "dovi_tool", "-m", "2", "convert", "--discard", bl, "-o", p8); err != nil {
+	if err := runSpinner(ctx, src, o, "dovi_tool P5→P8.1",
+		"dovi_tool", "-m", "2", "convert", "--discard", bl, "-o", p8); err != nil {
 		return "", fmt.Errorf("dovi_tool convert: %w", err)
 	}
 
@@ -153,7 +241,7 @@ func P5(ctx context.Context, src probe.Info, o Options) (string, error) {
 	//    original, DV metadata stripped, marker stamped.
 	tmp := tmpPath(src.Path)
 	args := []string{
-		"-hide_banner", "-loglevel", "error", "-stats", "-y",
+		"-hide_banner", "-loglevel", "error", "-nostats", "-y",
 		"-i", p8, "-i", src.Path,
 		flagMap, "0:v", flagMap, "1", flagMap, "-1:v",
 		"-map_chapters", "1",
@@ -163,9 +251,9 @@ func P5(ctx context.Context, src probe.Info, o Options) (string, error) {
 	}
 	args = append(args, markerArgs("dv-p5", "hdr10")...)
 	args = append(args, tmp)
-	if err := run(ctx, "ffmpeg", args...); err != nil {
+	if err := runFFmpeg(ctx, src, o, "remux + strip", args...); err != nil {
 		_ = os.Remove(tmp)
-		return "", fmt.Errorf("remux: %w", err)
+		return "", err
 	}
 	return publish(ctx, src, o)
 }

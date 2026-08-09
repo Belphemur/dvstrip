@@ -10,6 +10,7 @@ p5-mode: convert    # how to handle DV profile 5: convert | skip
 hdr10plus: true     # preserve HDR10+ when present, fall back to HDR10 otherwise
 full-scan: true     # watch mode only: scan the whole tree once at startup
 debounce: 5s        # watch mode only: settle time per changed file
+no-progress: false  # true: disable per-file progress bars (shown by default)
 extensions: [.mkv, .mp4, .ts, .m2ts]
 log-level: info     # trace | debug | info | warn | error
-log-json: false     # true: emit JSON log lines
+log-json: false     # true: emit JSON log lines (forces progress bars off)

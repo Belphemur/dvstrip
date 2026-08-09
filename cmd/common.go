@@ -69,12 +69,18 @@ func submitDir(q *queue.Queue, dir string) error {
 	})
 }
 
-// convertOptions builds the shared Options struct from viper config.
+// convertOptions builds the shared Options struct from viper config. The
+// progress tracker is only attached when it exists — a nil *Tracker stored in
+// the Progress interface would not compare == nil.
 func convertOptions() convert.Options {
-	return convert.Options{
+	o := convert.Options{
 		Suffix:  viper.GetString("suffix"),
 		Replace: viper.GetBool("replace"),
 	}
+	if tracker != nil {
+		o.Progress = tracker
+	}
+	return o
 }
 
 // handle is the queue worker: probe, classify, strip/keep accordingly.

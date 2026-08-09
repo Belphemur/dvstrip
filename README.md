@@ -10,6 +10,12 @@ Why? Many players (older TVs, some media servers without a DV license) mishandle
 
 Processed files are stamped with a container-level `dvstrip` tag so re-runs skip them automatically, and `--replace` mode overwrites the original **only after the output has been verified** (probe succeeds, resolution unchanged, DV gone, marker present) via an atomic rename.
 
+Every conversion shows a live per-file progress bar (bytes processed via ffmpeg's machine-readable progress, ETA included), one line per concurrent worker:
+
+```
+strip DV ██████████████░░░░░░  61% | 34.2 GiB/55.8 GiB | ETA 2m14s
+```
+
 ## Quick start
 
 ```bash
@@ -79,6 +85,7 @@ Install from source: `go install github.com/Belphemur/dvstrip@latest`
 | `--hdr10plus` | `false` | Preserve HDR10+ when present, fall back to HDR10 otherwise |
 | `--debounce` | `5s` | Watch mode: settle time per changed file |
 | `--full-scan` | `false` | Watch mode: scan the whole tree once at startup |
+| `--no-progress` | `false` | Disable per-file progress bars (on by default; forced off with `--log-json`) |
 | `--log-level` | `info` | `trace` \| `debug` \| `info` \| `warn` \| `error` |
 | `--log-json` | `false` | JSON log lines (for log collectors) |
 | `-e, --extensions` | `.mkv .mp4 .ts .m2ts` | Video extensions to consider |

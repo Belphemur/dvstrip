@@ -9,17 +9,18 @@ func TestParseActionMatrix(t *testing.T) {
 		hdr10  bool
 		dv     bool
 		dv5    bool
+		compat bool
 		hdr10p bool
 		proc   bool
 		action string
 	}{
-		{"p4k_hdr10_dv", true, true, true, false, false, false, ActionStripDV},
-		{"p4k_hdr10_dv_p81", true, true, true, false, false, false, ActionStripDV},
-		{"p4k_p5", true, true, true, true, false, false, ActionConvertP5},
-		{"p4k_hdr10_plain", true, true, false, false, false, false, ActionNone},
-		{"p4k_sdr", true, false, false, false, false, false, ActionSkipNotHDR10},
-		{"fullhdr10plus", true, true, false, false, true, false, ActionNone},
-		{"already_marked", true, true, false, false, false, true, ActionSkipMarked},
+		{"p4k_hdr10_dv", true, true, true, false, true, false, false, ActionStripDV},
+		{"p4k_hdr10_dv_p81", true, true, true, false, true, false, false, ActionStripDV},
+		{"p4k_p5", true, true, true, true, false, false, false, ActionConvertP5},
+		{"p4k_hdr10_plain", true, true, false, false, false, false, false, ActionNone},
+		{"p4k_sdr", true, false, false, false, false, false, false, ActionSkipNotHDR10},
+		{"fullhdr10plus", true, true, false, false, false, true, false, ActionNone},
+		{"already_marked", true, true, false, false, false, false, true, ActionSkipMarked},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -45,10 +46,8 @@ func TestParseActionMatrix(t *testing.T) {
 			if info.Processed != c.proc {
 				t.Errorf("Processed = %v, want %v", info.Processed, c.proc)
 			}
-			// compat 1/6 are the only HDR10-compatible DV cases in fixtures.
-			wantCompat := c.dv && (c.name == "p4k_hdr10_dv" || c.name == "p4k_hdr10_dv_p81" || c.name == "fullhdr10plus")
-			if info.DVHDR10Compatible() != wantCompat {
-				t.Errorf("DVHDR10Compatible() = %v, want %v", info.DVHDR10Compatible(), wantCompat)
+			if info.DVHDR10Compatible() != c.compat {
+				t.Errorf("DVHDR10Compatible() = %v, want %v", info.DVHDR10Compatible(), c.compat)
 			}
 			if info.Action() != c.action {
 				t.Errorf("Action() = %q, want %q", info.Action(), c.action)
