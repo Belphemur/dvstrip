@@ -56,8 +56,10 @@ type Info struct {
 	ProcessedNote  string // marker/comment tag value
 }
 
+// Is4K reports whether the stream is at least UHD width.
 func (i Info) Is4K() bool { return i.Width >= 3840 }
 
+// IsHDR10 reports whether the stream carries HDR10 signaling (PQ + BT.2020).
 func (i Info) IsHDR10() bool {
 	return i.ColorTransfer == "smpte2084" && i.ColorPrimaries == "bt2020"
 }

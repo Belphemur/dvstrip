@@ -1,3 +1,5 @@
+// Package cmd wires the dvstrip CLI: cobra commands, viper configuration,
+// and the zerolog instance shared by all commands and worker goroutines.
 package cmd
 
 import (
@@ -25,7 +27,7 @@ var cfgFile string
 var rootCmd = &cobra.Command{
 	Use:   "dvstrip",
 	Short: "Find 4K HDR files carrying Dolby Vision and normalize them to HDR10 (lossless, no re-encode)",
-	PersistentPreRunE: func(cmd *cobra.Command, args []string) error {
+	PersistentPreRunE: func(_ *cobra.Command, _ []string) error {
 		for _, bin := range []string{"ffprobe", "ffmpeg"} {
 			if _, err := exec.LookPath(bin); err != nil {
 				return fmt.Errorf("required binary %q not found in PATH", bin)
@@ -39,9 +41,9 @@ var rootCmd = &cobra.Command{
 // drains cleanly instead of being killed mid-remux.
 func Execute() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-	defer stop()
-
-	if err := rootCmd.ExecuteContext(ctx); err != nil {
+	err := rootCmd.ExecuteContext(ctx)
+	stop()
+	if err != nil {
 		os.Exit(1)
 	}
 }

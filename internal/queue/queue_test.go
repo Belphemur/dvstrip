@@ -17,7 +17,7 @@ func TestAutoWorkers(t *testing.T) {
 
 func TestDedup(t *testing.T) {
 	var calls atomic.Int64
-	q := New(1, func(_ context.Context, j Job) {
+	q := New(1, func(_ context.Context, _ Job) {
 		calls.Add(1)
 		time.Sleep(5 * time.Millisecond)
 	})
@@ -38,7 +38,7 @@ func TestDedup(t *testing.T) {
 
 func TestWaitDrainsAll(t *testing.T) {
 	var done atomic.Int64
-	q := New(4, func(_ context.Context, j Job) {
+	q := New(4, func(_ context.Context, _ Job) {
 		done.Add(1)
 	})
 	q.Start(context.Background())
@@ -55,7 +55,7 @@ func TestWaitDrainsAll(t *testing.T) {
 
 func TestDedupCollapsesDuplicates(t *testing.T) {
 	var done atomic.Int64
-	q := New(1, func(_ context.Context, j Job) {
+	q := New(1, func(_ context.Context, _ Job) {
 		done.Add(1)
 		time.Sleep(5 * time.Millisecond) // keep the path in-flight long enough to collide
 	})

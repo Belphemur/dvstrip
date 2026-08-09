@@ -20,11 +20,11 @@ type Handler func(ctx context.Context, job Job)
 
 // Queue is a fixed worker pool fed by a buffered channel.
 type Queue struct {
-	workers int
-	handler Handler
-	jobs    chan Job
+	workers  int
+	handler  Handler
+	jobs     chan Job
 	inflight sync.Map // paths currently queued or running (dedup)
-	pending sync.WaitGroup
+	pending  sync.WaitGroup
 }
 
 // New returns a Queue that will start `workers` goroutines on Start.

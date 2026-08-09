@@ -134,7 +134,7 @@ func strip(ctx context.Context, info probe.Info, l zerolog.Logger) {
 			return
 		}
 		l.Info().Int("profile", info.DVProfile).Msg("converting P5 -> P8.1 -> HDR10 (approximate colors, no re-encode)")
-		out, err = convert.ConvertP5(ctx, info, opts)
+		out, err = convert.P5(ctx, info, opts)
 	case info.DVHDR10Compatible():
 		l.Info().Int("profile", info.DVProfile).Int("compat", info.DVCompat).Msg("4K HDR10 + DV → stripping")
 		out, err = convert.StripDV(ctx, info, opts)

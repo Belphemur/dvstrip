@@ -110,14 +110,14 @@ func StripDV(ctx context.Context, src probe.Info, o Options) (string, error) {
 	return publish(ctx, src, o)
 }
 
-// ConvertP5 handles DV profile 5: extract raw HEVC, reshape the RPU from
+// P5 handles DV profile 5: extract raw HEVC, reshape the RPU from
 // profile 5 to 8.1 and discard the enhancement layer with dovi_tool, then
 // remux and strip DV metadata to land on HDR10. No pixel re-encoding happens.
 //
 // CAVEAT: a P5 base layer is not true HDR10 (IPTPQc2). The result renders
 // correctly on DV-aware players via the reshaped RPU path, but as plain
 // HDR10 the colors are approximate — only a full re-encode fixes that.
-func ConvertP5(ctx context.Context, src probe.Info, o Options) (string, error) {
+func P5(ctx context.Context, src probe.Info, o Options) (string, error) {
 	if _, err := exec.LookPath("dovi_tool"); err != nil {
 		return "", fmt.Errorf("dovi_tool not found in PATH (set p5-mode=skip to ignore P5)")
 	}

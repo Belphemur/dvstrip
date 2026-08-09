@@ -4,14 +4,14 @@ import "testing"
 
 func TestParseActionMatrix(t *testing.T) {
 	cases := []struct {
-		name    string
-		is4k    bool
-		hdr10   bool
-		dv      bool
-		dv5     bool
-		hdr10p  bool
-		proc    bool
-		action  string
+		name   string
+		is4k   bool
+		hdr10  bool
+		dv     bool
+		dv5    bool
+		hdr10p bool
+		proc   bool
+		action string
 	}{
 		{"p4k_hdr10_dv", true, true, true, false, false, false, "strip-dv"},
 		{"p4k_hdr10_dv_p81", true, true, true, false, false, false, "strip-dv"},
