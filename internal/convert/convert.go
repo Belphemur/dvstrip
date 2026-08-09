@@ -44,11 +44,17 @@ func tmpPath(in string) string {
 // IsTemp reports whether path is an in-flight remux produced by this tool.
 func IsTemp(path string) bool { return strings.Contains(path, TempMarker) }
 
+// ffmpeg argument flags used repeatedly across the conversion commands.
+const (
+	flagMap      = "-map"
+	flagMetadata = "-metadata"
+)
+
 // markerArgs stamps container-level tags so future runs recognize the file.
 func markerArgs(from, to string) []string {
 	return []string{
-		"-metadata", probe.MarkerKey + "=1",
-		"-metadata", fmt.Sprintf("comment=dvstrip: %s -> %s @ %s",
+		flagMetadata, probe.MarkerKey + "=1",
+		flagMetadata, fmt.Sprintf("comment=dvstrip: %s -> %s @ %s",
 			from, to, time.Now().UTC().Format(time.RFC3339)),
 	}
 }
@@ -97,7 +103,7 @@ func StripDV(ctx context.Context, src probe.Info, o Options) (string, error) {
 	args := []string{
 		"-hide_banner", "-loglevel", "error", "-stats", "-y",
 		"-i", src.Path,
-		"-map", "0", "-c", "copy",
+		flagMap, "0", "-c", "copy",
 		"-bsf:v", "hevc_metadata=remove_dovi=1",
 		"-max_muxing_queue_size", "2048",
 	}
@@ -133,7 +139,7 @@ func P5(ctx context.Context, src probe.Info, o Options) (string, error) {
 	// 1) extract raw annex-b HEVC video.
 	if err := run(ctx, "ffmpeg",
 		"-hide_banner", "-loglevel", "error", "-y",
-		"-i", src.Path, "-map", "0:v:0", "-c:v", "copy",
+		"-i", src.Path, flagMap, "0:v:0", "-c:v", "copy",
 		"-bsf:v", "hevc_mp4toannexb", "-f", "hevc", bl); err != nil {
 		return "", fmt.Errorf("extract hevc: %w", err)
 	}
@@ -149,7 +155,7 @@ func P5(ctx context.Context, src probe.Info, o Options) (string, error) {
 	args := []string{
 		"-hide_banner", "-loglevel", "error", "-stats", "-y",
 		"-i", p8, "-i", src.Path,
-		"-map", "0:v", "-map", "1", "-map", "-1:v",
+		flagMap, "0:v", flagMap, "1", flagMap, "-1:v",
 		"-map_chapters", "1",
 		"-c", "copy",
 		"-bsf:v", "hevc_metadata=remove_dovi=1",

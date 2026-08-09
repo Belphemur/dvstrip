@@ -16,7 +16,12 @@ builds:
     ldflags: [-s, -w]
 
 # No archives / checksums / brews: the only published artifacts are the
-# multi-arch docker images + manifest.
+# multi-arch docker images + manifest. "none" skips archiving entirely.
+archives:
+  - formats: ["none"]
+checksum:
+  disable: true
+
 dockers_v2:
   - id: dvstrip
     dockerfile: Dockerfile
