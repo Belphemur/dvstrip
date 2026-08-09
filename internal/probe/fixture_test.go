@@ -2,6 +2,12 @@ package probe
 
 import "encoding/json"
 
+// HDR10 color constants repeated across fixtures.
+const (
+	pqTransfer = "smpte2084"
+	bt2020     = "bt2020"
+)
+
 // ffprobeJSON builds a minimal ffprobe JSON document with a single video
 // stream and optional side data + format tags, for parse tests only.
 // dvProfile < 0 means "no DOVI side data".
@@ -43,12 +49,12 @@ func ffprobeJSON(width, height int, transfer, primaries string, dvProfile int, d
 
 // Cases map to the cmd decision matrix.
 var fixtures = map[string][]byte{
-	"p4k_hdr10_dv":     ffprobeJSON(3840, 2160, "smpte2084", "bt2020", 7, 6, false, nil),
-	"p4k_hdr10_dv_p81": ffprobeJSON(3840, 2160, "smpte2084", "bt2020", 8, 1, false, nil),
-	"p4k_p5":           ffprobeJSON(3840, 2160, "smpte2084", "bt2020", 5, 0, false, nil),
-	"p4k_hdr10_plain":  ffprobeJSON(3840, 2160, "smpte2084", "bt2020", -1, 0, false, nil),
+	"p4k_hdr10_dv":     ffprobeJSON(3840, 2160, pqTransfer, bt2020, 7, 6, false, nil),
+	"p4k_hdr10_dv_p81": ffprobeJSON(3840, 2160, pqTransfer, bt2020, 8, 1, false, nil),
+	"p4k_p5":           ffprobeJSON(3840, 2160, pqTransfer, bt2020, 5, 0, false, nil),
+	"p4k_hdr10_plain":  ffprobeJSON(3840, 2160, pqTransfer, bt2020, -1, 0, false, nil),
 	"p4k_sdr":          ffprobeJSON(3840, 2160, "bt709", "bt709", -1, 0, false, nil),
-	"fullhdr10plus":    ffprobeJSON(3840, 2160, "smpte2084", "bt2020", -1, 0, true, nil),
-	"already_marked": ffprobeJSON(3840, 2160, "smpte2084", "bt2020", -1, 0, false,
+	"fullhdr10plus":    ffprobeJSON(3840, 2160, pqTransfer, bt2020, -1, 0, true, nil),
+	"already_marked": ffprobeJSON(3840, 2160, pqTransfer, bt2020, -1, 0, false,
 		map[string]string{"dvstrip": "1", "comment": "dvstrip: hdr10 -> normalized"}),
 }

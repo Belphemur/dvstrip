@@ -71,23 +71,35 @@ func (i Info) IsDVP5() bool { return i.HasDV && i.DVProfile == 5 }
 // Compat IDs 1 and 6 (profiles 7.6, 8.1, ...) are safe to strip losslessly.
 func (i Info) DVHDR10Compatible() bool { return i.DVCompat == 1 || i.DVCompat == 6 }
 
+// Action strings returned by Info.Action. Exported so callers (and tests)
+// can compare against them instead of duplicating literals.
+const (
+	ActionSkipMarked   = "skip (already processed by dvstrip)"
+	ActionSkipNot4K    = "skip (not 4K)"
+	ActionSkipNotHDR10 = "skip (not HDR10)"
+	ActionNone         = "none (already plain HDR10)"
+	ActionStripDV      = "strip-dv"
+	ActionConvertP5    = "convert-p5 (dovi_tool p5->p8.1, then strip to HDR10)"
+	ActionManual       = "manual (unsupported DV profile/compat)"
+)
+
 // Action decides what dvstrip should do with the file.
 func (i Info) Action() string {
 	switch {
 	case i.Processed:
-		return "skip (already processed by dvstrip)"
+		return ActionSkipMarked
 	case !i.Is4K():
-		return "skip (not 4K)"
+		return ActionSkipNot4K
 	case i.IsDVP5():
-		return "convert-p5 (dovi_tool p5->p8.1, then strip to HDR10)"
+		return ActionConvertP5
 	case !i.IsHDR10():
-		return "skip (not HDR10)"
+		return ActionSkipNotHDR10
 	case !i.HasDV:
-		return "none (already plain HDR10)"
+		return ActionNone
 	case i.DVHDR10Compatible():
-		return "strip-dv"
+		return ActionStripDV
 	default:
-		return "manual (unsupported DV profile/compat)"
+		return ActionManual
 	}
 }
 

@@ -27,7 +27,7 @@ jobs:
           cache: true
       - uses: golangci/golangci-lint-action@v9
         with:
-          version: latest
+          version: v2.12.2 # pinned for reproducibility; bump deliberately
 
   goreleaser-snapshot:
     # Validates .goreleaser.yaml end-to-end (builds binaries + both docker

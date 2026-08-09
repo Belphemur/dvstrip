@@ -13,13 +13,13 @@ func TestParseActionMatrix(t *testing.T) {
 		proc   bool
 		action string
 	}{
-		{"p4k_hdr10_dv", true, true, true, false, false, false, "strip-dv"},
-		{"p4k_hdr10_dv_p81", true, true, true, false, false, false, "strip-dv"},
-		{"p4k_p5", true, true, true, true, false, false, "convert-p5 (dovi_tool p5->p8.1, then strip to HDR10)"},
-		{"p4k_hdr10_plain", true, true, false, false, false, false, "none (already plain HDR10)"},
-		{"p4k_sdr", true, false, false, false, false, false, "skip (not HDR10)"},
-		{"fullhdr10plus", true, true, false, false, true, false, "none (already plain HDR10)"},
-		{"already_marked", true, true, false, false, false, true, "skip (already processed by dvstrip)"},
+		{"p4k_hdr10_dv", true, true, true, false, false, false, ActionStripDV},
+		{"p4k_hdr10_dv_p81", true, true, true, false, false, false, ActionStripDV},
+		{"p4k_p5", true, true, true, true, false, false, ActionConvertP5},
+		{"p4k_hdr10_plain", true, true, false, false, false, false, ActionNone},
+		{"p4k_sdr", true, false, false, false, false, false, ActionSkipNotHDR10},
+		{"fullhdr10plus", true, true, false, false, true, false, ActionNone},
+		{"already_marked", true, true, false, false, false, true, ActionSkipMarked},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
