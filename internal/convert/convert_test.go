@@ -56,7 +56,7 @@ func TestBarLabel(t *testing.T) {
 		t.Errorf("short label = %q", short)
 	}
 	long := barLabel(probe.Info{Path: "/x/" + strings.Repeat("a", 100) + ".mkv"}, "strip DV")
-	if len(long) > 60+len(" · strip DV") {
+	if len(long) > 100+len(" · strip DV") {
 		t.Errorf("label not truncated: %d chars", len(long))
 	}
 	if !strings.Contains(long, "... · strip DV") {

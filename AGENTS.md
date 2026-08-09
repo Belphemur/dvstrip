@@ -34,6 +34,7 @@ Dockerfile          alpine + jellyfin-ffmpeg + dovi-tool + hdr10plus-tool
 ```bash
 go build ./...
 go vet ./...
+go fix ./...                 # modernize to latest Go idioms; must be a no-op
 go test ./... -race -count=1
 golangci-lint run        # v2 config in .golangci.yml; CI pins v2.12.2
 goreleaser check
@@ -53,7 +54,7 @@ Note: the StripDV integration test **skips** if the host ffmpeg lacks `remove_do
 1. **Atomicity:** ffmpeg never writes onto the input. Output → `<name>.dvstrip.tmp.<ext>` next to the source → re-probe verify (parses, same width, no DV, marker present) → `os.Rename`. `--replace` is only safe because of this.
 2. **Idempotency:** every output carries container tags `dvstrip=1` + `comment=dvstrip: …`; `probe` reads them back via `format_tags` (case-insensitive — MP4 lowercases keys). `--force` is the only bypass.
 3. **No feedback loops:** `isOwnOutput()` filters the suffix and `.dvstrip.tmp` infixes from scan/watch inputs.
-4. **All terminal output goes through `internal/display.Tracker`** when progress is active (log writer clears bars before printing). Never write directly to stderr/stdout in conversion paths, and never use ffmpeg `-stats` (use `-nostats` + `-progress pipe:1` parsed for `total_size=`).
+4. **All terminal output goes through `internal/display.Tracker`** when progress is active (log writer clears bars before printing). Never write directly to stderr/stdout in conversion paths, and never use ffmpeg `-stats` (use `-nostats` + `-progress pipe:1` parsed for `total_size=`). Every bar description must carry the **file basename** via `convert.barLabel()` (truncated to 100 chars) — a bare phase label ("strip DV") is useless with N concurrent workers.
 5. **Logging:** zerolog only (`pkg` in cmd), every file-scoped line carries `file=<basename>`. No `fmt.Println`/`log.Printf` in library code.
 6. **Decision authority:** classification lives exclusively in `internal/probe` (`Info.Action()` / predicate methods). `cmd` orchestrates, `internal/convert` executes. Keep it that way.
 

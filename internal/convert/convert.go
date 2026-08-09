@@ -96,7 +96,7 @@ func parseProgressBytes(line string) (int64, bool) {
 // truncating long release names so they don't eat the whole bar width.
 func barLabel(src probe.Info, phase string) string {
 	name := filepath.Base(src.Path)
-	const maxNameLen = 60
+	const maxNameLen = 100
 	if len(name) > maxNameLen {
 		name = name[:maxNameLen-3] + "..."
 	}
