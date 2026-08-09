@@ -27,6 +27,7 @@ const TempMarker = ".dvstrip.tmp"
 const (
 	flagMap      = "-map"
 	flagMetadata = "-metadata"
+	flagNoStats  = "-nostats"
 )
 
 // Progress is the sink convert reports ffmpeg progress into. It is
@@ -100,7 +101,7 @@ func runFFmpeg(ctx context.Context, src probe.Info, o Options, label string, arg
 		return run(ctx, "ffmpeg", args...)
 	}
 
-	full := append([]string{"-nostats", "-progress", "pipe:1"}, args...)
+	full := append([]string{flagNoStats, "-progress", "pipe:1"}, args...)
 	cmd := exec.CommandContext(ctx, "ffmpeg", full...)
 
 	stdout, err := cmd.StdoutPipe()
@@ -188,7 +189,7 @@ func publish(ctx context.Context, src probe.Info, o Options) (string, error) {
 func StripDV(ctx context.Context, src probe.Info, o Options) (string, error) {
 	tmp := tmpPath(src.Path)
 	args := []string{
-		"-hide_banner", "-loglevel", "error", "-nostats", "-y",
+		"-hide_banner", "-loglevel", "error", flagNoStats, "-y",
 		"-i", src.Path,
 		flagMap, "0", "-c", "copy",
 		"-bsf:v", "hevc_metadata=remove_dovi=1",
@@ -225,7 +226,7 @@ func P5(ctx context.Context, src probe.Info, o Options) (string, error) {
 
 	// 1) extract raw annex-b HEVC video.
 	if err := runFFmpeg(ctx, src, o, "extract HEVC",
-		"-hide_banner", "-loglevel", "error", "-nostats", "-y",
+		"-hide_banner", "-loglevel", "error", flagNoStats, "-y",
 		"-i", src.Path, flagMap, "0:v:0", "-c:v", "copy",
 		"-bsf:v", "hevc_mp4toannexb", "-f", "hevc", bl); err != nil {
 		return "", fmt.Errorf("extract hevc: %w", err)
@@ -241,7 +242,7 @@ func P5(ctx context.Context, src probe.Info, o Options) (string, error) {
 	//    original, DV metadata stripped, marker stamped.
 	tmp := tmpPath(src.Path)
 	args := []string{
-		"-hide_banner", "-loglevel", "error", "-nostats", "-y",
+		"-hide_banner", "-loglevel", "error", flagNoStats, "-y",
 		"-i", p8, "-i", src.Path,
 		flagMap, "0:v", flagMap, "1", flagMap, "-1:v",
 		"-map_chapters", "1",
