@@ -1,0 +1,39 @@
+version: 2
+project_name: dvstrip
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: dvstrip
+    main: .
+    binary: dvstrip
+    env:
+      - CGO_ENABLED=0
+    goos: [linux]
+    goarch: [amd64, arm64]
+    ldflags: [-s, -w]
+
+# No archives / checksums / brews: the only published artifacts are the
+# multi-arch docker images + manifest.
+dockers_v2:
+  - id: dvstrip
+    dockerfile: Dockerfile
+    ids: [dvstrip]
+    images:
+      - ghcr.io/belphemur/dvstrip
+    tags:
+      - "v{{ .Version }}"
+      - "{{ .Major }}.{{ .Minor }}"
+      - latest
+    platforms:
+      - linux/amd64
+      - linux/arm64
+    labels:
+      org.opencontainers.image.title: dvstrip
+      org.opencontainers.image.description: "Strip Dolby Vision to HDR10 without re-encoding"
+      org.opencontainers.image.source: https://github.com/Belphemur/dvstrip
+
+changelog:
+  use: github
