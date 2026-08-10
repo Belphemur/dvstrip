@@ -20,12 +20,12 @@ import (
 	"github.com/Belphemur/dvstrip/internal/probe"
 )
 
-// TempMarker is the suffix of the in-flight remux filename. The temp file
-// is a hidden dot-file that keeps the original extension so ffmpeg can infer
-// the container, and it ends in .swp like a Vim swap file (e.g.
-// .movie.mkv.swp). Media scanners ignore dot-files, and scan/watch can
-// identify them by suffix alone.
-const TempMarker = ".swp"
+// TempMarker is the infix of the in-flight remux filename. The temp file is
+// a hidden dot-file that keeps the original extension so ffmpeg can infer the
+// container, and it carries the marker `.swp.dvstrip.` before the original
+// basename (e.g. .swp.dvstrip.movie.mkv). Media scanners ignore dot-files,
+// and scan/watch can identify them by the marker alone.
+const TempMarker = ".swp.dvstrip."
 
 // ffmpeg argument flags used repeatedly across the conversion commands.
 const (
@@ -80,18 +80,20 @@ func (o Options) finalPath(in string) string {
 
 // tmpPath always lives next to the input so the final rename is atomic
 // (same directory ⇒ same filesystem ⇒ POSIX rename-over-replace). The temp
-// file is hidden (leading dot) and ends in .swp so media scanners ignore it
-// while ffmpeg still sees the original extension for format inference.
+// file is a hidden dot-file carrying the `.swp.dvstrip.` marker before the
+// original basename so media scanners ignore it while ffmpeg still sees the
+// original extension for format inference.
 func tmpPath(in string) string {
 	dir, base := filepath.Split(in)
-	return dir + "." + base + TempMarker
+	return dir + TempMarker + base
 }
 
 // IsTemp reports whether path is an in-flight remux produced by this tool.
-// It matches hidden files ending in .swp (e.g. .movie.mkv.swp).
+// It matches hidden files whose basename starts with the temp marker
+// (e.g. .swp.dvstrip.movie.mkv).
 func IsTemp(path string) bool {
 	base := filepath.Base(path)
-	return strings.HasPrefix(base, ".") && strings.HasSuffix(base, TempMarker)
+	return strings.HasPrefix(base, TempMarker)
 }
 
 // markerArgs stamps container-level tags so future runs recognize the file.

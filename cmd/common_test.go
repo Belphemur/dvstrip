@@ -34,8 +34,9 @@ func TestIsOwnOutput(t *testing.T) {
 	}{
 		{"/x/movie.hdr10.mkv", true},
 		{"/x/movie.hdr10.tmp.mkv", true},
-		{"/x/.movie.mkv.swp", true},
+		{"/x/.swp.dvstrip.movie.mkv", true},
 		{"/x/movie.mkv", false},
+		{"/x/.movie.mkv.swp", false},
 	}
 	for _, c := range cases {
 		if got := isOwnOutput(c.path); got != c.want {
@@ -46,7 +47,7 @@ func TestIsOwnOutput(t *testing.T) {
 
 func TestSweepTemp(t *testing.T) {
 	dir := t.TempDir()
-	stale := filepath.Join(dir, ".movie.mkv.swp")
+	stale := filepath.Join(dir, ".swp.dvstrip.movie.mkv")
 	if err := os.WriteFile(stale, []byte("partial"), 0o600); err != nil {
 		t.Fatalf("write stale tmp: %v", err)
 	}
