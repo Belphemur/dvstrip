@@ -178,11 +178,28 @@ func runSpinner(ctx context.Context, src probe.Info, o Options, label, name stri
 	return nil
 }
 
+// verifyOutput checks the remuxed tmp against the source before publish:
+// dimensions preserved, DV actually gone, HDR10+ (when the source carried
+// it) still present — stream copy keeps the ST 2094-40 SEI, so its loss
+// means the toolchain misbehaved and the output must not be published — and
+// the dvstrip marker stamped. Pure and unit-tested.
+func verifyOutput(src, out probe.Info) error {
+	switch {
+	case out.Width != src.Width:
+		return fmt.Errorf("verify: width changed %d -> %d", src.Width, out.Width)
+	case out.HasDV:
+		return fmt.Errorf("verify: Dolby Vision metadata still present after strip")
+	case src.HasHDR10Plus && !out.HasHDR10Plus:
+		return fmt.Errorf("verify: HDR10+ metadata lost during strip")
+	case !out.Processed:
+		return fmt.Errorf("verify: dvstrip marker missing in output")
+	}
+	return nil
+}
+
 // publish verifies the remuxed tmp file and makes it visible under its final
-// name. Verification: re-probe (must parse), preserve source width, DV must
-// actually be gone, and the dvstrip marker must be present. On any failure
-// the caller's deferred cleanup removes the tmp file and the original is
-// left untouched.
+// name. On any failure the caller's deferred cleanup removes the tmp file
+// and the original is left untouched.
 func publish(ctx context.Context, src probe.Info, o Options) (string, error) {
 	tmp, final := tmpPath(src.Path), o.finalPath(src.Path)
 
@@ -190,13 +207,8 @@ func publish(ctx context.Context, src probe.Info, o Options) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("verify: probe failed: %w", err)
 	}
-	switch {
-	case out.Width != src.Width:
-		return "", fmt.Errorf("verify: width changed %d -> %d", src.Width, out.Width)
-	case out.HasDV:
-		return "", fmt.Errorf("verify: Dolby Vision metadata still present after strip")
-	case !out.Processed:
-		return "", fmt.Errorf("verify: dvstrip marker missing in output")
+	if err := verifyOutput(src, out); err != nil {
+		return "", err
 	}
 
 	if err := os.Rename(tmp, final); err != nil { // atomic on POSIX

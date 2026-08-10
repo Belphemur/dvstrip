@@ -44,6 +44,33 @@ func TestIsTemp(t *testing.T) {
 	}
 }
 
+func TestVerifyOutput(t *testing.T) {
+	base := probe.Info{Width: 3840, Processed: true}
+	cases := []struct {
+		name    string
+		src     probe.Info
+		out     probe.Info
+		wantErr string // "" expects nil
+	}{
+		{"ok", base, base, ""},
+		{"width changed", base, probe.Info{Width: 1920, Processed: true}, "width changed"},
+		{"dv still present", base, probe.Info{Width: 3840, HasDV: true, Processed: true}, "still present"},
+		{"hdr10+ preserved", probe.Info{Width: 3840, HasHDR10Plus: true}, probe.Info{Width: 3840, HasHDR10Plus: true, Processed: true}, ""},
+		{"hdr10+ lost", probe.Info{Width: 3840, HasHDR10Plus: true}, base, "HDR10+ metadata lost"},
+		{"hdr10+ absent in source not required", base, base, ""},
+		{"marker missing", base, probe.Info{Width: 3840}, "marker missing"},
+	}
+	for _, c := range cases {
+		err := verifyOutput(c.src, c.out)
+		switch {
+		case c.wantErr == "" && err != nil:
+			t.Errorf("%s: unexpected error: %v", c.name, err)
+		case c.wantErr != "" && (err == nil || !strings.Contains(err.Error(), c.wantErr)):
+			t.Errorf("%s: error = %v, want substring %q", c.name, err, c.wantErr)
+		}
+	}
+}
+
 func TestParseProgressBytes(t *testing.T) {
 	if n, ok := parseProgressBytes("total_size=123456789"); !ok || n != 123456789 {
 		t.Errorf("total_size parse: n=%d ok=%v", n, ok)

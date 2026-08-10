@@ -95,6 +95,7 @@ Both paths end in `publish()`:
    - probe fails to parse the file,
    - width changed vs. the source,
    - DV metadata is still present,
+   - the source carried HDR10+ and the output no longer does (the ST 2094-40 SEI must survive the strip),
    - the `dvstrip` marker tag is missing.
 3. **publish**: `os.Rename(tmp, final)` — POSIX rename-over is atomic. With `--replace`, `final` is the original path; otherwise it's `<name><suffix>.<ext>` (default `.hdr10`).
 
