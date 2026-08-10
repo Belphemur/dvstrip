@@ -65,16 +65,16 @@ A fixed worker pool fed by a buffered channel (`workers * 8` capacity):
 ### Normal path: `StripDV` (DV compat 1/6 — profiles 7.6, 8.1)
 
 ```
-ffmpeg -hide_banner -loglevel error -stats -y \
+ffmpeg -hide_banner -loglevel error -nostats -y \
   -i <in> -map 0 -c copy \
-  -bsf:v hevc_metadata=remove_dovi=1 \
+  -bsf:v:0 hevc_metadata=remove_dovi=1 \
   -max_muxing_queue_size 2048 \
   -metadata dvstrip=1 \
   -metadata comment="dvstrip: dv -> hdr10 @ <RFC3339>" \
   .swp.dvstrip.<in>
 ```
 
-`-c copy` means **stream copy**: no decoding, no re-encoding, bit-identical A/V/S. The only change is the removal of RPU/enhancement-layer NAL units by the `hevc_metadata` bitstream filter, plus the two container tags.
+`-c copy` means **stream copy**: no decoding, no re-encoding, bit-identical A/V/S. The only change is the removal of RPU/enhancement-layer NAL units by the `hevc_metadata` bitstream filter, plus the two container tags. The filter is pinned to `v:0` (the probed video stream) because `-map 0` also carries attached covers (mjpeg), which reject the HEVC-only filter.
 
 ### Profile 5 path: `ConvertP5`
 

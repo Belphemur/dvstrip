@@ -233,7 +233,9 @@ func StripDV(ctx context.Context, src probe.Info, o Options) (string, error) {
 		"-hide_banner", "-loglevel", "error", flagNoStats, "-y",
 		"-i", src.Path,
 		flagMap, "0", "-c", "copy",
-		"-bsf:v", "hevc_metadata=remove_dovi=1",
+		// Pin the HEVC-only bitstream filter to the probed video stream:
+		// -map 0 also carries attached covers (mjpeg), which reject it.
+		"-bsf:v:0", "hevc_metadata=remove_dovi=1",
 		"-max_muxing_queue_size", "2048",
 	}
 	args = append(args, markerArgs("dv", "hdr10")...)
