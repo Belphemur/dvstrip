@@ -110,3 +110,52 @@ func TestStripDVIntegration(t *testing.T) {
 		t.Error("output still reports Dolby Vision")
 	}
 }
+
+// TestStripDVWithCoverArt regress-tests the -bsf:v:0 pinning: a file with an
+// attached mjpeg cover made a bare -bsf:v abort ("Codec 'mjpeg' is not
+// supported by the bitstream filter"). The strip must succeed and the cover
+// must survive the remux.
+func TestStripDVWithCoverArt(t *testing.T) {
+	skipWithoutTools(t)
+	if !removeDVISupported(t) {
+		t.Skip("host ffmpeg lacks hevc_metadata=remove_dovi (need >= 7.1 or jellyfin-ffmpeg)")
+	}
+	ctx := context.Background()
+	dir := t.TempDir()
+	base := genClip(t, dir)
+
+	// Attach a cover: an mjpeg "video" stream carrying attached_pic.
+	cover := filepath.Join(dir, "cover.jpg")
+	if out, err := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+		"-f", "lavfi", "-i", "testsrc=duration=1:size=64x64:rate=1",
+		"-frames:v", "1", "-c:v", "mjpeg", cover).CombinedOutput(); err != nil {
+		t.Fatalf("generate cover: %v\n%s", err, out)
+	}
+	withCover := filepath.Join(dir, "withcover.mkv")
+	if out, err := exec.Command("ffmpeg", "-hide_banner", "-loglevel", "error", "-y",
+		"-i", base.Path, "-i", cover,
+		"-map", "0", "-map", "1", "-c", "copy", "-disposition:v:1", "attached_pic",
+		withCover).CombinedOutput(); err != nil {
+		t.Fatalf("attach cover: %v\n%s", err, out)
+	}
+	info, err := probe.Probe(ctx, withCover)
+	if err != nil {
+		t.Fatalf("probe: %v", err)
+	}
+
+	tr := display.New(os.Stderr)
+	defer tr.Close()
+	out, err := StripDV(ctx, info, Options{Suffix: ".hdr10", Progress: tr})
+	if err != nil {
+		t.Fatalf("strip with cover: %v", err)
+	}
+
+	chk, err := exec.CommandContext(ctx, "ffprobe", "-v", "error",
+		"-show_entries", "stream=codec_name", "-of", "csv=p=0", out).Output()
+	if err != nil {
+		t.Fatalf("ffprobe output: %v", err)
+	}
+	if !strings.Contains(string(chk), "mjpeg") {
+		t.Errorf("attached cover lost in output, streams: %s", chk)
+	}
+}

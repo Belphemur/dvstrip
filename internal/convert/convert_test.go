@@ -3,6 +3,7 @@ package convert
 import (
 	"path/filepath"
 	"reflect"
+	"slices"
 	"strings"
 	"testing"
 
@@ -41,6 +42,30 @@ func TestIsTemp(t *testing.T) {
 	}
 	if IsTemp("/x/movie.hdr10.mkv") {
 		t.Error("final output path flagged as temp")
+	}
+}
+
+func TestStripArgs(t *testing.T) {
+	tmp := "/in/.swp.dvstrip.movie.mkv"
+	args := stripArgs("/in/movie.mkv", tmp)
+	joined := strings.Join(args, " ")
+
+	// The HEVC-only filter must be pinned to the probed stream: a bare
+	// -bsf:v also hits attached mjpeg covers, which reject it (exit 234).
+	if !slices.Contains(args, "-bsf:v:0") {
+		t.Errorf("missing -bsf:v:0 pinning: %s", joined)
+	}
+	if slices.Contains(args, "-bsf:v") {
+		t.Errorf("bare -bsf:v must not be used (breaks on attached covers): %s", joined)
+	}
+	// ffmpeg guesses the output muxer from the last argument's extension.
+	if args[len(args)-1] != tmp {
+		t.Errorf("output path must be the last argument, got %q", args[len(args)-1])
+	}
+	for _, want := range []string{"-nostats", "-map 0", "-c copy", "hevc_metadata=remove_dovi=1", "dvstrip=1"} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("args missing %q: %s", want, joined)
+		}
 	}
 }
 

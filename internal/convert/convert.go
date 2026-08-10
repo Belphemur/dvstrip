@@ -217,6 +217,23 @@ func publish(ctx context.Context, src probe.Info, o Options) (string, error) {
 	return final, nil
 }
 
+// stripArgs builds the StripDV ffmpeg command line. Pure and unit-tested:
+// the argument list is the contract with ffmpeg — the output path must come
+// last (muxer is guessed from its extension), and -bsf:v:0 pins the
+// HEVC-only bitstream filter to the probed video stream, because a bare
+// -bsf:v would also hit attached mjpeg covers, which reject it.
+func stripArgs(in, tmp string) []string {
+	args := []string{
+		"-hide_banner", "-loglevel", "error", flagNoStats, "-y",
+		"-i", in,
+		flagMap, "0", "-c", "copy",
+		"-bsf:v:0", "hevc_metadata=remove_dovi=1",
+		"-max_muxing_queue_size", "2048",
+	}
+	args = append(args, markerArgs("dv", "hdr10")...)
+	return append(args, tmp)
+}
+
 // StripDV removes DV metadata (RPU/EL) from an HDR10-compatible DV stream
 // (compat 1/6: profiles 7.6, 8.1). Pure stream copy — no re-encode.
 // Requires ffmpeg >= 7.1 (hevc_metadata=remove_dovi) or jellyfin-ffmpeg.
@@ -229,18 +246,7 @@ func StripDV(ctx context.Context, src probe.Info, o Options) (string, error) {
 	tmp := tmpPath(src.Path)
 	defer func() { _ = os.Remove(tmp) }()
 
-	args := []string{
-		"-hide_banner", "-loglevel", "error", flagNoStats, "-y",
-		"-i", src.Path,
-		flagMap, "0", "-c", "copy",
-		// Pin the HEVC-only bitstream filter to the probed video stream:
-		// -map 0 also carries attached covers (mjpeg), which reject it.
-		"-bsf:v:0", "hevc_metadata=remove_dovi=1",
-		"-max_muxing_queue_size", "2048",
-	}
-	args = append(args, markerArgs("dv", "hdr10")...)
-	args = append(args, tmp)
-	if err := runFFmpeg(ctx, src, o, "strip DV", args...); err != nil {
+	if err := runFFmpeg(ctx, src, o, "strip DV", stripArgs(src.Path, tmp)...); err != nil {
 		return "", err
 	}
 	return publish(ctx, src, o)
