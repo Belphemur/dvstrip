@@ -20,7 +20,11 @@ import (
 	"github.com/Belphemur/dvstrip/internal/probe"
 )
 
-// TempMarker identifies in-flight remux files so scan/watch ignore them.
+// TempMarker is appended to the source path to form the in-flight remux
+// filename (e.g. movie.mkv.dvstrip.tmp). Keeping the original extension in
+// the middle means the path no longer ends in a media extension, so media
+// scanners (Plex/Jellyfin/…) never see in-flight files, and scan/watch can
+// identify them by suffix alone.
 const TempMarker = ".dvstrip.tmp"
 
 // ffmpeg argument flags used repeatedly across the conversion commands.
@@ -56,14 +60,16 @@ func (o Options) finalPath(in string) string {
 }
 
 // tmpPath always lives next to the input so the final rename is atomic
-// (same directory ⇒ same filesystem ⇒ POSIX rename-over-replace).
+// (same directory ⇒ same filesystem ⇒ POSIX rename-over-replace). The marker
+// is appended rather than inserted before the extension so the resulting
+// filename no longer ends in a media extension and is invisible to media
+// scanners while in flight.
 func tmpPath(in string) string {
-	ext := filepath.Ext(in)
-	return strings.TrimSuffix(in, ext) + TempMarker + ext
+	return in + TempMarker
 }
 
 // IsTemp reports whether path is an in-flight remux produced by this tool.
-func IsTemp(path string) bool { return strings.Contains(path, TempMarker) }
+func IsTemp(path string) bool { return strings.HasSuffix(path, TempMarker) }
 
 // markerArgs stamps container-level tags so future runs recognize the file.
 func markerArgs(from, to string) []string {
@@ -167,24 +173,21 @@ func runSpinner(ctx context.Context, src probe.Info, o Options, label, name stri
 // publish verifies the remuxed tmp file and makes it visible under its final
 // name. Verification: re-probe (must parse), preserve source width, DV must
 // actually be gone, and the dvstrip marker must be present. On any failure
-// the tmp file is removed and the original is left untouched.
+// the caller's deferred cleanup removes the tmp file and the original is
+// left untouched.
 func publish(ctx context.Context, src probe.Info, o Options) (string, error) {
 	tmp, final := tmpPath(src.Path), o.finalPath(src.Path)
 
 	out, err := probe.Probe(ctx, tmp)
 	if err != nil {
-		_ = os.Remove(tmp)
 		return "", fmt.Errorf("verify: probe failed: %w", err)
 	}
 	switch {
 	case out.Width != src.Width:
-		_ = os.Remove(tmp)
 		return "", fmt.Errorf("verify: width changed %d -> %d", src.Width, out.Width)
 	case out.HasDV:
-		_ = os.Remove(tmp)
 		return "", fmt.Errorf("verify: Dolby Vision metadata still present after strip")
 	case !out.Processed:
-		_ = os.Remove(tmp)
 		return "", fmt.Errorf("verify: dvstrip marker missing in output")
 	}
 
@@ -197,8 +200,15 @@ func publish(ctx context.Context, src probe.Info, o Options) (string, error) {
 // StripDV removes DV metadata (RPU/EL) from an HDR10-compatible DV stream
 // (compat 1/6: profiles 7.6, 8.1). Pure stream copy — no re-encode.
 // Requires ffmpeg >= 7.1 (hevc_metadata=remove_dovi) or jellyfin-ffmpeg.
+//
+// The tmp file is cleaned up on every return path (deferred removal), so a
+// failed remux, a failed verification, a panic, or os.Exit all leave nothing
+// behind. After a successful publish the tmp has already been renamed away,
+// making the deferred removal a harmless no-op.
 func StripDV(ctx context.Context, src probe.Info, o Options) (string, error) {
 	tmp := tmpPath(src.Path)
+	defer func() { _ = os.Remove(tmp) }()
+
 	args := []string{
 		"-hide_banner", "-loglevel", "error", flagNoStats, "-y",
 		"-i", src.Path,
@@ -209,7 +219,6 @@ func StripDV(ctx context.Context, src probe.Info, o Options) (string, error) {
 	args = append(args, markerArgs("dv", "hdr10")...)
 	args = append(args, tmp)
 	if err := runFFmpeg(ctx, src, o, "strip DV", args...); err != nil {
-		_ = os.Remove(tmp)
 		return "", err
 	}
 	return publish(ctx, src, o)
@@ -252,6 +261,7 @@ func P5(ctx context.Context, src probe.Info, o Options) (string, error) {
 	// 3) remux: video from the converted stream, audio/subs/chapters from the
 	//    original, DV metadata stripped, marker stamped.
 	tmp := tmpPath(src.Path)
+	defer func() { _ = os.Remove(tmp) }()
 	args := []string{
 		"-hide_banner", "-loglevel", "error", flagNoStats, "-y",
 		"-i", p8, "-i", src.Path,
@@ -264,7 +274,6 @@ func P5(ctx context.Context, src probe.Info, o Options) (string, error) {
 	args = append(args, markerArgs("dv-p5", "hdr10")...)
 	args = append(args, tmp)
 	if err := runFFmpeg(ctx, src, o, "remux + strip", args...); err != nil {
-		_ = os.Remove(tmp)
 		return "", err
 	}
 	return publish(ctx, src, o)

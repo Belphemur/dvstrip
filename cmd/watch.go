@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/Belphemur/dvstrip/internal/convert"
 	"github.com/Belphemur/dvstrip/internal/queue"
 
 	"github.com/fsnotify/fsnotify"
@@ -36,11 +37,18 @@ var watchCmd = &cobra.Command{
 		defer func() { _ = watcher.Close() }()
 
 		// fsnotify is not recursive: watch the root and every existing subdir.
+		// Sweep any tmp files left behind by a crashed run while we are here.
 		if err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
-			if err != nil || !d.IsDir() {
+			if err != nil {
 				return err
 			}
-			return watcher.Add(path)
+			if d.IsDir() {
+				return watcher.Add(path)
+			}
+			if convert.IsTemp(path) {
+				sweepTemp(path)
+			}
+			return nil
 		}); err != nil {
 			return err
 		}

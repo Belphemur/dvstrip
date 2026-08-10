@@ -3,6 +3,7 @@ package cmd
 import (
 	"context"
 	"io/fs"
+	"os"
 	"path/filepath"
 	"strings"
 	"sync/atomic"
@@ -55,13 +56,35 @@ func isOwnOutput(path string) bool {
 	return strings.Contains(stem, viper.GetString("suffix"))
 }
 
+// sweepTemp removes an in-flight remux file left behind by a crashed run
+// (SIGKILL / power loss). A well-behaved run deletes its own tmps — on
+// success they are renamed away, on failure a deferred os.Remove cleans up —
+// so anything still on disk at scan time is necessarily stale. It is a no-op
+// for any path that does not carry the temp marker.
+func sweepTemp(path string) {
+	if !convert.IsTemp(path) {
+		return
+	}
+	l := log(path)
+	if err := os.Remove(path); err == nil {
+		l.Warn().Msg("removed stale temp file from a crashed run")
+	}
+}
+
 // submitDir enqueues every video under dir (used by scan and watch --full-scan).
 func submitDir(q *queue.Queue, dir string) error {
 	return filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
-		if d.IsDir() || !isVideo(path) || isOwnOutput(path) {
+		if d.IsDir() {
+			return nil
+		}
+		if convert.IsTemp(path) {
+			sweepTemp(path)
+			return nil
+		}
+		if !isVideo(path) || isOwnOutput(path) {
 			return nil
 		}
 		q.Submit(queue.Job{Path: path})
