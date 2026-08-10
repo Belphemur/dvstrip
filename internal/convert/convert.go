@@ -40,6 +40,10 @@ const (
 	flagNoStats  = "-nostats"
 )
 
+// bsfRemoveDovi is the bitstream filter spec that strips DV RPU/EL from the
+// HEVC stream (ffmpeg >= 7.1 / jellyfin-ffmpeg).
+const bsfRemoveDovi = "hevc_metadata=remove_dovi=1"
+
 // Progress is the sink convert reports ffmpeg progress into. It is
 // implemented by display.Tracker; nil means "no progress UI".
 type Progress interface {
@@ -227,7 +231,7 @@ func stripArgs(in, tmp string) []string {
 		"-hide_banner", "-loglevel", "error", flagNoStats, "-y",
 		"-i", in,
 		flagMap, "0", "-c", "copy",
-		"-bsf:v:0", "hevc_metadata=remove_dovi=1",
+		"-bsf:v:0", bsfRemoveDovi,
 		"-max_muxing_queue_size", "2048",
 	}
 	args = append(args, markerArgs("dv", "hdr10")...)
@@ -296,7 +300,7 @@ func P5(ctx context.Context, src probe.Info, o Options) (string, error) {
 		flagMap, "0:v", flagMap, "1", flagMap, "-1:v",
 		"-map_chapters", "1",
 		"-c", "copy",
-		"-bsf:v", "hevc_metadata=remove_dovi=1",
+		"-bsf:v", bsfRemoveDovi,
 		"-max_muxing_queue_size", "2048",
 	}
 	args = append(args, markerArgs("dv-p5", "hdr10")...)

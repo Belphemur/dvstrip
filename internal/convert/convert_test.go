@@ -62,7 +62,7 @@ func TestStripArgs(t *testing.T) {
 	if args[len(args)-1] != tmp {
 		t.Errorf("output path must be the last argument, got %q", args[len(args)-1])
 	}
-	for _, want := range []string{"-nostats", "-map 0", "-c copy", "hevc_metadata=remove_dovi=1", "dvstrip=1"} {
+	for _, want := range []string{"-nostats", "-map 0", "-c copy", bsfRemoveDovi, probe.MarkerKey + "=1"} {
 		if !strings.Contains(joined, want) {
 			t.Errorf("args missing %q: %s", want, joined)
 		}
@@ -124,9 +124,9 @@ func TestBarLabel(t *testing.T) {
 
 func TestMarkerArgs(t *testing.T) {
 	args := markerArgs("dv", "hdr10")
-	want := []string{flagMetadata, "dvstrip=1", flagMetadata, "comment=dvstrip: dv -> hdr10 @ "}
+	want := []string{flagMetadata, probe.MarkerKey + "=1", flagMetadata, "comment=dvstrip: dv -> hdr10 @ "}
 	// check structure (comment value has a timestamp we can't predict).
-	if len(args) != 4 || args[0] != flagMetadata || args[1] != "dvstrip=1" || args[2] != flagMetadata {
+	if len(args) != 4 || args[0] != flagMetadata || args[1] != probe.MarkerKey+"=1" || args[2] != flagMetadata {
 		t.Fatalf("unexpected marker args: %v", args)
 	}
 	if !reflect.DeepEqual(args[:3], want[:3]) {
