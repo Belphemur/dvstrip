@@ -17,7 +17,7 @@ func TestIsVideo(t *testing.T) {
 		{"/x/movie.MKV", true},
 		{"/x/clip.mp4", true},
 		{"/x/song.flac", false},
-		{"/x/movie.mkv.dvstrip.tmp", false}, // in-flight temp: no media extension
+		{"/x/.swp.dvstrip.movie.mkv", true}, // in-flight temp keeps the media extension; convert.IsTemp is the guard
 	}
 	for _, c := range cases {
 		if got := isVideo(c.path); got != c.want {
@@ -34,7 +34,7 @@ func TestIsOwnOutput(t *testing.T) {
 	}{
 		{"/x/movie.hdr10.mkv", true},
 		{"/x/movie.hdr10.tmp.mkv", true},
-		{"/x/movie.mkv.dvstrip.tmp", true},
+		{"/x/.swp.dvstrip.movie.mkv", true},
 		{"/x/movie.mkv", false},
 	}
 	for _, c := range cases {
@@ -46,7 +46,7 @@ func TestIsOwnOutput(t *testing.T) {
 
 func TestSweepTemp(t *testing.T) {
 	dir := t.TempDir()
-	stale := filepath.Join(dir, "movie.mkv.dvstrip.tmp")
+	stale := filepath.Join(dir, ".swp.dvstrip.movie.mkv")
 	if err := os.WriteFile(stale, []byte("partial"), 0o600); err != nil {
 		t.Fatalf("write stale tmp: %v", err)
 	}

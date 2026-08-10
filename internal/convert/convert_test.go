@@ -16,7 +16,7 @@ func TestOutPaths(t *testing.T) {
 	if out != filepath.Join("in", "movie.hdr10.mkv") {
 		t.Errorf("finalPath = %q", out)
 	}
-	if tmp != filepath.Join("in", "movie.mkv.dvstrip.tmp") {
+	if tmp != filepath.Join("in", ".swp.dvstrip.movie.mkv") {
 		t.Errorf("tmpPath = %q", tmp)
 	}
 }
@@ -30,8 +30,11 @@ func TestOutPathsReplace(t *testing.T) {
 }
 
 func TestIsTemp(t *testing.T) {
-	if !IsTemp("/x/movie.mkv.dvstrip.tmp") {
+	if !IsTemp("/x/.swp.dvstrip.movie.mkv") {
 		t.Error("expected temp path to be detected")
+	}
+	if !IsTemp("/x/movie.mkv.dvstrip.tmp") {
+		t.Error("legacy temp suffix must still be detected (crash leftovers)")
 	}
 	if IsTemp("/x/movie.mkv") {
 		t.Error("normal path flagged as temp")

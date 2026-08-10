@@ -20,12 +20,18 @@ import (
 	"github.com/Belphemur/dvstrip/internal/probe"
 )
 
-// TempMarker is appended to the source path to form the in-flight remux
-// filename (e.g. movie.mkv.dvstrip.tmp). Keeping the original extension in
-// the middle means the path no longer ends in a media extension, so media
-// scanners (Plex/Jellyfin/…) never see in-flight files, and scan/watch can
-// identify them by suffix alone.
-const TempMarker = ".dvstrip.tmp"
+// TempMarker prefixes the source basename to form the in-flight remux
+// filename (e.g. .swp.dvstrip.movie.mkv next to movie.mkv). The leading dot
+// hides the file from media scanners (Plex/Jellyfin/…), while the real media
+// extension stays at the end of the name: ffmpeg guesses the output muxer
+// from the filename extension and refuses unknown suffixes ("Unable to
+// choose an output format"), so the extension must remain last.
+const TempMarker = ".swp.dvstrip."
+
+// legacyTempSuffix is the retired scheme (<name><ext>.dvstrip.tmp). Still
+// recognized so scan/watch sweeps remove stale tmps a hard crash may have
+// left behind under an older version.
+const legacyTempSuffix = ".dvstrip.tmp"
 
 // ffmpeg argument flags used repeatedly across the conversion commands.
 const (
@@ -61,15 +67,17 @@ func (o Options) finalPath(in string) string {
 
 // tmpPath always lives next to the input so the final rename is atomic
 // (same directory ⇒ same filesystem ⇒ POSIX rename-over-replace). The marker
-// is appended rather than inserted before the extension so the resulting
-// filename no longer ends in a media extension and is invisible to media
-// scanners while in flight.
+// prefixes the basename (dotfile ⇒ hidden from media scanners) rather than
+// being appended, so the filename keeps ending in the real media extension
+// and ffmpeg's extension-based muxer detection keeps working.
 func tmpPath(in string) string {
-	return in + TempMarker
+	return filepath.Join(filepath.Dir(in), TempMarker+filepath.Base(in))
 }
 
 // IsTemp reports whether path is an in-flight remux produced by this tool.
-func IsTemp(path string) bool { return strings.HasSuffix(path, TempMarker) }
+func IsTemp(path string) bool {
+	return strings.HasPrefix(filepath.Base(path), TempMarker) || strings.HasSuffix(path, legacyTempSuffix)
+}
 
 // markerArgs stamps container-level tags so future runs recognize the file.
 func markerArgs(from, to string) []string {

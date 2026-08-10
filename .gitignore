@@ -7,6 +7,7 @@
 *.dylib
 
 # In-flight ffmpeg output (never committed)
+.swp.dvstrip.*
 *.dvstrip.tmp
 
 # Test binary, built with `go test -c`
