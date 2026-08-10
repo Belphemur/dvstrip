@@ -6,7 +6,7 @@
 - golangci-lint v2
 - goreleaser v2
 - docker with buildx (for the container part of the pipeline)
-- ffmpeg/ffprobe/dovi_tool on PATH only if you want to run the real binary locally (unit tests don't need them)
+- ffmpeg/ffprobe/dovi_tool on PATH only if you want to run the real binary locally (unit tests don't need them). For the integration tests you need `hevc_metadata=remove_dovi` (ffmpeg ≥ 7.1 or jellyfin-ffmpeg). On Arch/CachyOS: `sudo pacman -S jellyfin-ffmpeg`, then symlink its binaries like the Dockerfile does: `sudo ln -sf /usr/lib/jellyfin-ffmpeg/{ffmpeg,ffprobe} /usr/local/bin/`
 
 ## Layout
 
@@ -33,14 +33,15 @@ golangci-lint run ./...
 Test philosophy:
 
 - `probe` tests never execute ffprobe — they feed recorded JSON fixtures through `probe.Parse`. The detection matrix (HDR10+DV p7/p8, P5, plain HDR10, SDR, HDR10+, already-marked) is covered there.
-- `convert` tests cover naming/marker/temp helpers (pure functions); the ffmpeg paths are exercised end-to-end by the CI snapshot build + manual runs, not by unit tests shelling out.
+- `convert` tests cover naming/marker/temp helpers and the generated ffmpeg command line (`stripArgs`, pure). The ffmpeg paths are exercised end-to-end by build-tagged integration tests (`go test -tags integration ./internal/convert/ -v`), which run in CI against a pinned portable jellyfin-ffmpeg.
 - `queue` tests cover dedup, drain, and `AutoWorkers` bounds, under `-race`.
 
 ## CI/CD
 
 Two workflows in `.github/workflows/`:
 
-- **ci.yml** (push/PR to main): `go vet`, `go test -race`, golangci-lint, then a full **goreleaser snapshot** — builds both linux binaries and both docker platforms (via QEMU + buildx) without pushing. If a PR breaks the Dockerfile or the goreleaser config, CI catches it.
+- **ci.yml** (push/PR to main): `go vet`, `go test -race`, golangci-lint, an **integration** job (real StripDV runs incl. the attached-cover regression, against a pinned portable jellyfin-ffmpeg), then a full **goreleaser snapshot** — builds both linux binaries and both docker platforms (via QEMU + buildx) without pushing. If a PR breaks the Dockerfile or the goreleaser config, CI catches it. All jobs funnel into a single **`gate`** job — mark only `gate` as required in branch protection; it fails if any job fails or is skipped.
+- **Renovate** (`renovate.json`, hosted Mend app): `automerge` via GitHub auto-merge — every dependency PR merges itself once the `gate` check is green. Requires the Renovate app installed on the repo and `allow_auto_merge` enabled in repo settings.
 - **release.yml** (tags `v*`): checkout with full history (for the changelog), QEMU + buildx, GHCR login with `GITHUB_TOKEN`, `goreleaser release --clean`.
 
 Repository needs no extra secrets: the built-in `GITHUB_TOKEN` gets `contents: write` (GitHub Release) and `packages: write` (GHCR).

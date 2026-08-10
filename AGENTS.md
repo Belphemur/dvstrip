@@ -24,7 +24,8 @@ internal/
   display/          multi-bar terminal renderer; owns all terminal writes
   queue/            fixed worker pool, per-path dedup, AutoWorkers
 docs/               user/developer documentation (mermaid diagrams)
-.github/workflows/  ci.yml (vet/test/lint/goreleaser snapshot) + release.yml (tags → GHCR)
+.github/workflows/  ci.yml (vet/test/lint/integration/goreleaser snapshot → single `gate` job for branch protection) + release.yml (tags → GHCR)
+renovate.json       Renovate: automerge every dependency PR once `gate` is green (needs the Mend app installed + repo allow_auto_merge)
 Dockerfile          alpine + jellyfin-ffmpeg + dovi-tool + hdr10plus-tool
 .goreleaser.yaml    dockers_v2 only (linux/amd64+arm64); NO archives/checksums (docker-only releases)
 ```
@@ -47,7 +48,7 @@ Integration tests (real ffmpeg) are build-tagged and skipped by default:
 go test -tags integration ./internal/convert/ -v
 ```
 
-Note: the StripDV integration test **skips** if the host ffmpeg lacks `remove_dovi` (needs ≥ 7.1 / jellyfin-ffmpeg). The container image always has a working ffmpeg.
+Note: the StripDV integration tests **skip** if the host ffmpeg lacks `remove_dovi` (needs ≥ 7.1 / jellyfin-ffmpeg). CI runs them in the `integration` job against a pinned portable jellyfin-ffmpeg (version in `ci.yml`'s `JELLYFIN_FFMPEG`). The container image always has a working ffmpeg.
 
 ## Non-negotiable invariants (do not break these)
 
@@ -61,7 +62,7 @@ Note: the StripDV integration test **skips** if the host ffmpeg lacks `remove_do
 ## Coding style
 
 - Guard clauses at the top; flat core logic; parse once at the boundary into typed state (`probe.Info`).
-- Pure, testable seams: parsing (`probe.Parse`), progress-line parsing (`convert.parseProgressBytes`), naming (`finalPath`/`tmpPath`). Subprocess execution is thin and untested-by-unit (covered by integration tag).
+- Pure, testable seams: parsing (`probe.Parse`), progress-line parsing (`convert.parseProgressBytes`), naming (`finalPath`/`tmpPath`), ffmpeg command building (`convert.stripArgs`), output verification (`convert.verifyOutput`). Subprocess execution is thin and untested-by-unit (covered by integration tag).
 - Follow golangci-lint v2 config: `errcheck` is enforced (use `_ =` deliberately), `goconst` (extract strings repeated ≥ 4× into constants), `revive` exported comments, `gofumpt` formatting (`golangci-lint fmt`).
 - Conventional commits (`feat:`, `fix:`, `ci:`, `docs:`, `build:`, `style:`, `chore:`), logically grouped — one concern per commit.
 
@@ -73,7 +74,7 @@ Note: the StripDV integration test **skips** if the host ffmpeg lacks `remove_do
 
 ## Environment gotchas
 
-- Host ffmpeg may be < 7.1 (no `remove_dovi`); the Docker image is the reference environment.
+- Host ffmpeg may be < 7.1 (no `remove_dovi`); the Docker image is the reference environment. On Arch/CachyOS: `sudo pacman -S jellyfin-ffmpeg` then symlink `/usr/lib/jellyfin-ffmpeg/{ffmpeg,ffprobe}` into `/usr/local/bin` (same as the Dockerfile) so the bare `ffmpeg` name resolves to the jellyfin build.
 - fsnotify is not recursive — watch mode adds subdirs explicitly; inotify does not work on NFS/SMB mounts.
 - Worker pool workers never exit (documented simplification); `Queue.Wait()` is the drain mechanism.
 - `Options.Progress` must be left nil when no tracker exists — assigning a typed nil `*display.Tracker` to the interface breaks the `== nil` check (see `convertOptions`).
