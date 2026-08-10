@@ -37,7 +37,7 @@ const (
 
 // outputFormat maps a container file extension to the ffmpeg output muxer
 // name. A non-empty result is injected as "-f <muxer>" before the output path
-// so remuxing works even when the temp filename ends in .swp.
+// so remuxing works even when the temp filename carries the temp marker.
 func outputFormat(ext string) string {
 	switch strings.ToLower(ext) {
 	case ".mkv":

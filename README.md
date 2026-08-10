@@ -104,7 +104,7 @@ Config file (`dvstrip.yaml` in cwd or `~/.config/dvstrip/`) and env vars (`DVSTR
 
 ## Safety model (short version)
 
-ffmpeg never writes onto the input. Output goes to `.<name>.mkv.swp` **next to the source** (a hidden, Vim-style swap file that keeps the extension), gets **verified** by a fresh probe (parses, same width, DV gone, marker present), and only then `os.Rename` publishes it — atomic on POSIX. The hidden `.swp` name is ignored by media scanners (Plex/Jellyfin/…) and by dvstrip's own scan/watch filter. A failed/killed run leaves the original untouched — the tmp is deleted on every error path, and stale `.swp` files from a hard crash (`SIGKILL`/power loss) are swept on the next scan. **`--replace` keeps no backup.** `--dry-run` overrides everything.
+ffmpeg never writes onto the input. Output goes to `.swp.dvstrip.<name>.<ext>` **next to the source** (a hidden dot-file that keeps the extension), gets **verified** by a fresh probe (parses, same width, DV gone, marker present), and only then `os.Rename` publishes it — atomic on POSIX. The hidden `.swp.dvstrip.` name is ignored by media scanners (Plex/Jellyfin/…) and by dvstrip's own scan/watch filter. A failed/killed run leaves the original untouched — the tmp is deleted on every error path, and stale `.swp.dvstrip.` files from a hard crash (`SIGKILL`/power loss) are swept on the next scan. **`--replace` keeps no backup.** `--dry-run` overrides everything.
 
 Details: [docs/how-it-works.md](docs/how-it-works.md#the-tmp--verify--publish-protocol).
 
