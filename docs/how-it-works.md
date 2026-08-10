@@ -71,7 +71,8 @@ ffmpeg -hide_banner -loglevel error -stats -y \
   -max_muxing_queue_size 2048 \
   -metadata dvstrip=1 \
   -metadata comment="dvstrip: dv -> hdr10 @ <RFC3339>" \
-  <in>.dvstrip.tmp
+  -f matroska \
+  .<in>.swp
 ```
 
 `-c copy` means **stream copy**: no decoding, no re-encoding, bit-identical A/V/S. The only change is the removal of RPU/enhancement-layer NAL units by the `hevc_metadata` bitstream filter, plus the two container tags.
@@ -90,7 +91,7 @@ See [hdr-metadata.md](hdr-metadata.md) for why this is done and the color-accura
 
 Both paths end in `publish()`:
 
-1. **tmp**: ffmpeg writes to `<name><ext>.dvstrip.tmp` (e.g. `movie.mkv.dvstrip.tmp`) **in the same directory** as the source (same filesystem ⇒ atomic rename later). The video extension sits *inside* the name and the path ends in `.tmp`, so it is an orphan to media scanners and to our own scan/watch extension filter alike; `convert.IsTemp` (suffix match) is the explicit guard. The tmp file is unconditionally removed on return by a `defer` inside `StripDV`/`P5`, so a failed remux, a failed verification, a panic, or `os.Exit` all leave nothing behind — after a successful `publish` the rename has already moved it away and the removal is a no-op.
+1. **tmp**: ffmpeg writes to `.<name>.<ext>.swp` (e.g. `.movie.mkv.swp`) **in the same directory** as the source (same filesystem ⇒ atomic rename later). The file is hidden (leading dot) and ends in `.swp` like a Vim swap file, so media scanners ignore it; dvstrip's `convert.IsTemp` recognizes the pattern. Because `.swp` is not a media extension, the ffmpeg command injects `-f <muxer>` (e.g. `matroska`) before the output path. The tmp file is unconditionally removed on return by a `defer` inside `StripDV`/`P5`, so a failed remux, a failed verification, a panic, or `os.Exit` all leave nothing behind — after a successful `publish` the rename has already moved it away and the removal is a no-op.
 2. **verify**: the tmp file is re-probed with `probe.Probe`. Failure conditions (any of → delete tmp, keep original, report error):
    - probe fails to parse the file,
    - width changed vs. the source,
@@ -101,7 +102,7 @@ Both paths end in `publish()`:
 Consequences:
 
 - `--replace` can never leave a half-written file: the original exists untouched until the verified rename.
-- A hard crash (`SIGKILL`/power loss) can leave a `<name>.mkv.dvstrip.tmp` behind — in-process deferrals can't run. The next `scan` or `watch` sweep detects and removes it (logged at warn level).
+- A hard crash (`SIGKILL`/power loss) can leave a `.<name>.mkv.swp` behind — in-process deferrals can't run. The next `scan` or `watch` sweep detects and removes it (logged at warn level).
 - In `watch` mode, the rename itself fires fresh fsnotify events on the original path — the debounced re-probe then finds the `dvstrip` marker and logs `[already processed]`, so there is no feedback loop. (Queue dedup + marker check are the two guards.)
 
 ## 4. Marker & idempotency
@@ -111,7 +112,7 @@ Every produced file carries two container-level tags written in the same remux p
 - `dvstrip=1` — machine-readable marker
 - `comment=dvstrip: <from> -> <to> @ <timestamp>` — human-readable provenance
 
-`probe` reads them back via `format_tags`. `handle` skips marked files unless `--force` is set. This is the primary idempotency mechanism; the secondary one is filename-based (`isOwnOutput`: `.dvstrip.tmp` suffixes and `<suffix>`-stemmed names are never enqueued).
+`probe` reads them back via `format_tags`. `handle` skips marked files unless `--force` is set. This is the primary idempotency mechanism; the secondary one is filename-based (`isOwnOutput`: `.swp` temp files and `<suffix>`-stemmed names are never enqueued).
 
 ## 5. Watch mode
 

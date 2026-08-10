@@ -16,7 +16,7 @@ func TestOutPaths(t *testing.T) {
 	if out != filepath.Join("in", "movie.hdr10.mkv") {
 		t.Errorf("finalPath = %q", out)
 	}
-	if tmp != filepath.Join("in", "movie.mkv.dvstrip.tmp") {
+	if tmp != filepath.Join("in", ".movie.mkv.swp") {
 		t.Errorf("tmpPath = %q", tmp)
 	}
 }
@@ -30,7 +30,7 @@ func TestOutPathsReplace(t *testing.T) {
 }
 
 func TestIsTemp(t *testing.T) {
-	if !IsTemp("/x/movie.mkv.dvstrip.tmp") {
+	if !IsTemp("/x/.movie.mkv.swp") {
 		t.Error("expected temp path to be detected")
 	}
 	if IsTemp("/x/movie.mkv") {
@@ -38,6 +38,9 @@ func TestIsTemp(t *testing.T) {
 	}
 	if IsTemp("/x/movie.hdr10.mkv") {
 		t.Error("final output path flagged as temp")
+	}
+	if IsTemp("/x/movie.swp") {
+		t.Error("non-hidden .swp file flagged as temp")
 	}
 }
 
@@ -76,5 +79,26 @@ func TestMarkerArgs(t *testing.T) {
 	}
 	if !reflect.DeepEqual(args[:3], want[:3]) {
 		t.Errorf("marker args head: got %v want %v", args[:3], want[:3])
+	}
+}
+
+func TestOutputFormat(t *testing.T) {
+	cases := []struct {
+		ext  string
+		want string
+	}{
+		{".mkv", "matroska"},
+		{".MKV", "matroska"},
+		{".mp4", "mp4"},
+		{".m4v", "mp4"},
+		{".mov", "mov"},
+		{".ts", "mpegts"},
+		{".m2ts", "mpegts"},
+		{".flac", ""},
+	}
+	for _, c := range cases {
+		if got := outputFormat(c.ext); got != c.want {
+			t.Errorf("outputFormat(%q) = %q, want %q", c.ext, got, c.want)
+		}
 	}
 }

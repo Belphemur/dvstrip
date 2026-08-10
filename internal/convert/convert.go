@@ -20,19 +20,38 @@ import (
 	"github.com/Belphemur/dvstrip/internal/probe"
 )
 
-// TempMarker is appended to the source path to form the in-flight remux
-// filename (e.g. movie.mkv.dvstrip.tmp). Keeping the original extension in
-// the middle means the path no longer ends in a media extension, so media
-// scanners (Plex/Jellyfin/…) never see in-flight files, and scan/watch can
+// TempMarker is the suffix of the in-flight remux filename. The temp file
+// is a hidden dot-file that keeps the original extension so ffmpeg can infer
+// the container, and it ends in .swp like a Vim swap file (e.g.
+// .movie.mkv.swp). Media scanners ignore dot-files, and scan/watch can
 // identify them by suffix alone.
-const TempMarker = ".dvstrip.tmp"
+const TempMarker = ".swp"
 
 // ffmpeg argument flags used repeatedly across the conversion commands.
 const (
+	flagFormat   = "-f"
 	flagMap      = "-map"
 	flagMetadata = "-metadata"
 	flagNoStats  = "-nostats"
 )
+
+// outputFormat maps a container file extension to the ffmpeg output muxer
+// name. A non-empty result is injected as "-f <muxer>" before the output path
+// so remuxing works even when the temp filename ends in .swp.
+func outputFormat(ext string) string {
+	switch strings.ToLower(ext) {
+	case ".mkv":
+		return "matroska"
+	case ".mp4", ".m4v":
+		return "mp4"
+	case ".mov":
+		return "mov"
+	case ".ts", ".m2ts":
+		return "mpegts"
+	default:
+		return ""
+	}
+}
 
 // Progress is the sink convert reports ffmpeg progress into. It is
 // implemented by display.Tracker; nil means "no progress UI".
@@ -60,16 +79,20 @@ func (o Options) finalPath(in string) string {
 }
 
 // tmpPath always lives next to the input so the final rename is atomic
-// (same directory ⇒ same filesystem ⇒ POSIX rename-over-replace). The marker
-// is appended rather than inserted before the extension so the resulting
-// filename no longer ends in a media extension and is invisible to media
-// scanners while in flight.
+// (same directory ⇒ same filesystem ⇒ POSIX rename-over-replace). The temp
+// file is hidden (leading dot) and ends in .swp so media scanners ignore it
+// while ffmpeg still sees the original extension for format inference.
 func tmpPath(in string) string {
-	return in + TempMarker
+	dir, base := filepath.Split(in)
+	return dir + "." + base + TempMarker
 }
 
 // IsTemp reports whether path is an in-flight remux produced by this tool.
-func IsTemp(path string) bool { return strings.HasSuffix(path, TempMarker) }
+// It matches hidden files ending in .swp (e.g. .movie.mkv.swp).
+func IsTemp(path string) bool {
+	base := filepath.Base(path)
+	return strings.HasPrefix(base, ".") && strings.HasSuffix(base, TempMarker)
+}
 
 // markerArgs stamps container-level tags so future runs recognize the file.
 func markerArgs(from, to string) []string {
@@ -217,6 +240,9 @@ func StripDV(ctx context.Context, src probe.Info, o Options) (string, error) {
 		"-max_muxing_queue_size", "2048",
 	}
 	args = append(args, markerArgs("dv", "hdr10")...)
+	if f := outputFormat(filepath.Ext(src.Path)); f != "" {
+		args = append(args, flagFormat, f)
+	}
 	args = append(args, tmp)
 	if err := runFFmpeg(ctx, src, o, "strip DV", args...); err != nil {
 		return "", err
@@ -272,6 +298,9 @@ func P5(ctx context.Context, src probe.Info, o Options) (string, error) {
 		"-max_muxing_queue_size", "2048",
 	}
 	args = append(args, markerArgs("dv-p5", "hdr10")...)
+	if f := outputFormat(filepath.Ext(src.Path)); f != "" {
+		args = append(args, flagFormat, f)
+	}
 	args = append(args, tmp)
 	if err := runFFmpeg(ctx, src, o, "remux + strip", args...); err != nil {
 		return "", err
