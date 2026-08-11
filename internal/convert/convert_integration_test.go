@@ -67,7 +67,7 @@ func TestProgressPipeline(t *testing.T) {
 
 	tr := display.New(os.Stderr)
 	defer tr.Close()
-	err := runFFmpeg(context.Background(), info, Options{Progress: tr}, "copy test",
+	err := runFFmpeg(context.Background(), info, Options{Progress: tr}, dst,
 		"-hide_banner", "-loglevel", "error", "-nostats", "-y",
 		"-i", info.Path, "-c", "copy", dst)
 	if err != nil {

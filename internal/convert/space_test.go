@@ -20,6 +20,34 @@ func TestFreeSpace(t *testing.T) {
 	}
 }
 
+// reservedFor is a test helper reading the guard's total for the filesystem
+// holding dir.
+func reservedFor(t *testing.T, g *SpaceGuard, dir string) int64 {
+	t.Helper()
+	key, err := fsKey(dir)
+	if err != nil {
+		t.Fatalf("fsKey: %v", err)
+	}
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	return g.reserved[key]
+}
+
+func TestSpaceGuardZeroValue(t *testing.T) {
+	// The zero value must be ready to use: no NewSpaceGuard, no nil-map panic.
+	var g SpaceGuard
+	dir := t.TempDir()
+	r := g.reserve(dir, 1024)
+	if r == nil {
+		t.Fatal("reserve on zero-value guard failed")
+	}
+	g.shrinkDir(dir, 512)
+	g.release(r)
+	if got := reservedFor(t, &g, dir); got != 0 {
+		t.Errorf("reserved after release = %d, want 0", got)
+	}
+}
+
 func TestSpaceGuardReserveAccounting(t *testing.T) {
 	dir := t.TempDir()
 	g := NewSpaceGuard()
@@ -29,34 +57,107 @@ func TestSpaceGuardReserveAccounting(t *testing.T) {
 	}
 
 	// A reservation beyond free space must fail and leave nothing reserved.
-	if g.reserve(dir, free*2) {
+	if g.reserve(dir, free*2) != nil {
 		t.Fatal("oversized reservation unexpectedly succeeded")
 	}
-	if !g.reserve(dir, free/2) {
+	r := g.reserve(dir, free/2)
+	if r == nil {
 		t.Fatal("reservation within free space failed")
 	}
 	// The projected final space left counts running jobs: a second job must
 	// not be able to push the total over the free space.
-	if g.reserve(dir, free) {
+	if g.reserve(dir, free) != nil {
 		t.Fatal("reservation exceeding free-minus-reserved succeeded")
 	}
 	// As bytes land on disk the reservation shrinks, but the file itself now
 	// occupies the space — the projection must stay conservative.
-	g.shrink(dir, free/4)
-	if g.reserve(dir, free) {
+	g.shrinkDir(dir, free/4)
+	if g.reserve(dir, free) != nil {
 		t.Fatal("reservation beyond projected final space succeeded after shrink")
 	}
-	g.release(dir)
-	if !g.reserve(dir, free/2) {
+	g.release(r)
+	if g.reserve(dir, free/2) == nil {
 		t.Fatal("reservation after release failed")
 	}
 	// Shrinking past zero must clamp, not go negative.
-	g.shrink(dir, free*10)
-	g.mu.Lock()
-	r := g.reserved[dir]
-	g.mu.Unlock()
-	if r != 0 {
-		t.Errorf("reservation after overshrink = %d, want 0", r)
+	g.shrinkDir(dir, free*10)
+	if got := reservedFor(t, g, dir); got != 0 {
+		t.Errorf("reservation after overshrink = %d, want 0", got)
+	}
+}
+
+// TestSpaceGuardSharedFilesystem: sibling directories on the same filesystem
+// must share one ledger entry — a reservation made in one must count against
+// the free space seen from the other.
+func TestSpaceGuardSharedFilesystem(t *testing.T) {
+	parent := t.TempDir()
+	a := filepath.Join(parent, "a")
+	b := filepath.Join(parent, "b")
+	for _, d := range []string{a, b} {
+		if err := os.Mkdir(d, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	ka, err := fsKey(a)
+	if err != nil {
+		t.Fatalf("fsKey(a): %v", err)
+	}
+	kb, err := fsKey(b)
+	if err != nil {
+		t.Fatalf("fsKey(b): %v", err)
+	}
+	if ka != kb {
+		t.Skip("sibling temp dirs landed on different filesystems")
+	}
+
+	g := NewSpaceGuard()
+	free, err := freeSpace(a)
+	if err != nil {
+		t.Fatalf("freeSpace: %v", err)
+	}
+	r := g.reserve(a, free/2)
+	if r == nil {
+		t.Fatal("reserve on dir a failed")
+	}
+	// From b's point of view the same bytes are already spoken for.
+	if g.reserve(b, free) != nil {
+		t.Fatal("reservation from sibling dir ignored the existing reservation")
+	}
+	g.release(r)
+	if g.reserve(b, free/2) == nil {
+		t.Fatal("reservation from sibling dir failed after release")
+	}
+}
+
+// TestSpaceGuardConcurrentReservations: releasing one job must only drop that
+// job's remaining bytes, never the reservations other jobs still hold.
+func TestSpaceGuardConcurrentReservations(t *testing.T) {
+	dir := t.TempDir()
+	g := NewSpaceGuard()
+	free, err := freeSpace(dir)
+	if err != nil {
+		t.Fatalf("freeSpace: %v", err)
+	}
+	q := free / 4
+	r1 := g.reserve(dir, q)
+	r2 := g.reserve(dir, q)
+	if r1 == nil || r2 == nil {
+		t.Fatal("quarter-disk reservations failed")
+	}
+	// Job 1 wrote half its output, then finishes: only its remaining half is
+	// dropped; job 2's full reservation must survive.
+	g.shrinkDir(dir, q/2)
+	g.release(r1)
+	if got := reservedFor(t, g, dir); got != q {
+		t.Errorf("reserved after partial release = %d, want %d", got, q)
+	}
+	// Job 2's reservation still counts against new jobs.
+	if g.reserve(dir, free) != nil {
+		t.Fatal("reservation succeeded despite job 2 still holding space")
+	}
+	g.release(r2)
+	if got := reservedFor(t, g, dir); got != 0 {
+		t.Errorf("reserved after all releases = %d, want 0", got)
 	}
 }
 
@@ -67,7 +168,7 @@ func TestSpaceGuardAcquireNoWait(t *testing.T) {
 	if err != nil {
 		t.Fatalf("freeSpace: %v", err)
 	}
-	err = g.acquire(context.Background(), dir, free*2, false)
+	_, err = g.acquire(context.Background(), dir, free*2, false)
 	if !errors.Is(err, ErrNoSpace) {
 		t.Fatalf("acquire error = %v, want ErrNoSpace", err)
 	}
@@ -92,15 +193,16 @@ func TestSpaceGuardAcquireWaitUnblockedByRelease(t *testing.T) {
 	if err != nil {
 		t.Fatalf("freeSpace: %v", err)
 	}
-	if !g.reserve(dir, free) {
+	r := g.reserve(dir, free)
+	if r == nil {
 		t.Fatal("initial full-disk reservation failed")
 	}
 	go func() {
 		time.Sleep(50 * time.Millisecond)
-		g.release(dir)
+		g.release(r)
 	}()
 	start := time.Now()
-	if err := g.acquire(context.Background(), dir, free/2, true); err != nil {
+	if _, err := g.acquire(context.Background(), dir, free/2, true); err != nil {
 		t.Fatalf("acquire(wait) = %v", err)
 	}
 	if time.Since(start) < 50*time.Millisecond {
@@ -116,12 +218,12 @@ func TestSpaceGuardAcquireWaitCancelled(t *testing.T) {
 	if err != nil {
 		t.Fatalf("freeSpace: %v", err)
 	}
-	if !g.reserve(dir, free) {
+	if g.reserve(dir, free) == nil {
 		t.Fatal("initial full-disk reservation failed")
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 	defer cancel()
-	if err := g.acquire(ctx, dir, 1, true); !errors.Is(err, context.DeadlineExceeded) {
+	if _, err := g.acquire(ctx, dir, 1, true); !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("acquire(wait) on full disk = %v, want context deadline", err)
 	}
 }
@@ -162,15 +264,28 @@ func TestAccountWritten(t *testing.T) {
 
 	dir := t.TempDir()
 	g := NewSpaceGuard()
-	if !g.reserve(dir, 1000) {
+	if g.reserve(dir, 1000) == nil {
 		t.Fatal("reserve failed")
 	}
 	(Options{Space: g}).accountWritten(filepath.Join(dir, "movie.mkv"), 400)
-	g.mu.Lock()
-	r := g.reserved[dir]
-	g.mu.Unlock()
-	if r != 600 {
-		t.Errorf("reservation after accountWritten = %d, want 600", r)
+	if got := reservedFor(t, g, dir); got != 600 {
+		t.Errorf("reservation after accountWritten = %d, want 600", got)
+	}
+}
+
+// TestAccountWrittenOutsideReservation: bytes landing outside the reserved
+// destination (the P5 intermediates under os.MkdirTemp) must not shrink the
+// reservation.
+func TestAccountWrittenOutsideReservation(t *testing.T) {
+	dir := t.TempDir()
+	g := NewSpaceGuard()
+	if g.reserve(dir, 1000) == nil {
+		t.Fatal("reserve failed")
+	}
+	tmp := t.TempDir() // stands in for the os.MkdirTemp P5 dir
+	(Options{Space: g}).accountWritten(filepath.Join(tmp, "bl.hevc"), 400)
+	if got := reservedFor(t, g, dir); got != 1000 {
+		t.Errorf("reservation after foreign accountWritten = %d, want 1000", got)
 	}
 }
 

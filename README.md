@@ -12,7 +12,7 @@ Processed files are stamped with a container-level `dvstrip` tag so re-runs skip
 
 Every conversion shows a live per-file progress bar (file name, percent, humanized bytes written vs. source size, ETA included), one line per concurrent worker:
 
-```
+```text
 [18m10s] : MY_FILE.mkv  ██████████████░░░░░░  61% | 34.2 GiB/55.8 GiB | ETA 2m14s
 ```
 

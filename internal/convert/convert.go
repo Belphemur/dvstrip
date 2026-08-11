@@ -126,8 +126,11 @@ func barLabel(src probe.Info) string {
 // runFFmpeg runs ffmpeg with -nostats and, when a Progress sink is set,
 // streams machine-readable -progress output into a per-file bar keyed by the
 // source path. ffmpeg stderr is captured and attached to any returned error
-// instead of being dumped raw onto the terminal.
-func runFFmpeg(ctx context.Context, src probe.Info, o Options, args ...string) error {
+// instead of being dumped raw onto the terminal. out is the file ffmpeg
+// writes; only bytes landing in the reserved destination directory shrink the
+// job's space reservation (e.g. the P5 extraction writes under os.MkdirTemp
+// and must leave the reservation untouched).
+func runFFmpeg(ctx context.Context, src probe.Info, o Options, out string, args ...string) error {
 	if o.Progress == nil {
 		return run(ctx, "ffmpeg", args...)
 	}
@@ -161,7 +164,7 @@ func runFFmpeg(ctx context.Context, src probe.Info, o Options, args ...string) e
 			// Keep the space reservation in sync with what ffmpeg has
 			// actually written so far, so the projected final free space
 			// stays accurate for jobs still waiting to start.
-			o.accountWritten(src.Path, n-written)
+			o.accountWritten(out, n-written)
 			written = n
 			o.Progress.Set(src.Path, n)
 		}
@@ -264,7 +267,7 @@ func StripDV(ctx context.Context, src probe.Info, o Options) (string, error) {
 	tmp := tmpPath(src.Path)
 	defer func() { _ = os.Remove(tmp) }()
 
-	if err := runFFmpeg(ctx, src, o, stripArgs(src.Path, tmp)...); err != nil {
+	if err := runFFmpeg(ctx, src, o, tmp, stripArgs(src.Path, tmp)...); err != nil {
 		return "", err
 	}
 	return publish(ctx, src, o)
@@ -300,8 +303,9 @@ func P5(ctx context.Context, src probe.Info, o Options) (string, error) {
 	bl := filepath.Join(dir, "bl.hevc")
 	p8 := filepath.Join(dir, "p8.hevc")
 
-	// 1) extract raw annex-b HEVC video.
-	if err := runFFmpeg(ctx, src, o,
+	// 1) extract raw annex-b HEVC video (writes to the os.MkdirTemp dir, not
+	//    the reserved destination, so these bytes must not shrink the guard).
+	if err := runFFmpeg(ctx, src, o, bl,
 		"-hide_banner", "-loglevel", "error", flagNoStats, "-y",
 		"-i", src.Path, flagMap, "0:v:0", "-c:v", "copy",
 		"-bsf:v", "hevc_mp4toannexb", "-f", "hevc", bl); err != nil {
@@ -329,7 +333,7 @@ func P5(ctx context.Context, src probe.Info, o Options) (string, error) {
 	}
 	args = append(args, markerArgs("dv-p5", "hdr10")...)
 	args = append(args, tmp)
-	if err := runFFmpeg(ctx, src, o, args...); err != nil {
+	if err := runFFmpeg(ctx, src, o, tmp, args...); err != nil {
 		return "", err
 	}
 	return publish(ctx, src, o)
