@@ -282,6 +282,16 @@ func P5(ctx context.Context, src probe.Info, o Options) (string, error) {
 		return "", fmt.Errorf("dovi_tool not found in PATH (set p5-mode=skip to ignore P5)")
 	}
 
+	// Reserve destination space before doing any work: in replace mode this
+	// waits for room up front instead of spending the extract/reshape I/O
+	// first, and the reservation covers the whole pipeline so the projected
+	// final space left stays conservative for jobs waiting to start.
+	release, err := o.reserveOutput(ctx, src.Path)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+
 	dir, err := os.MkdirTemp("", "dvstrip-p5-")
 	if err != nil {
 		return "", fmt.Errorf("temp dir: %w", err)
@@ -304,15 +314,8 @@ func P5(ctx context.Context, src probe.Info, o Options) (string, error) {
 		return "", fmt.Errorf("dovi_tool convert: %w", err)
 	}
 
-	// 3) reserve destination space, then remux: video from the converted
-	//    stream, audio/subs/chapters from the original, DV metadata
-	//    stripped, marker stamped.
-	release, err := o.reserveOutput(ctx, src.Path)
-	if err != nil {
-		return "", err
-	}
-	defer release()
-
+	// 3) remux: video from the converted stream, audio/subs/chapters from
+	//    the original, DV metadata stripped, marker stamped.
 	tmp := tmpPath(src.Path)
 	defer func() { _ = os.Remove(tmp) }()
 	args := []string{
