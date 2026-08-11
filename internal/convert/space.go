@@ -18,8 +18,8 @@ const spaceHeadroom = 1.05
 
 // waitPollInterval is how often free space is re-checked while a replace-mode
 // job waits for room. Short enough to start soon after space frees up, long
-// enough to keep statfs spam negligible.
-const waitPollInterval = 5 * time.Second
+// enough to keep statfs spam negligible. A variable so tests can shorten it.
+var waitPollInterval = 5 * time.Second
 
 // ErrNoSpace is returned when a conversion cannot start because the
 // destination filesystem is too small (free space minus what the already
@@ -102,14 +102,17 @@ func (g *SpaceGuard) acquire(ctx context.Context, dir string, need int64, wait b
 	if !wait {
 		return fmt.Errorf("%w for %s: need %s plus what running jobs still require", ErrNoSpace, dir, humanBytes(need))
 	}
+	t := time.NewTimer(waitPollInterval)
+	defer t.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return ctx.Err()
-		case <-time.After(waitPollInterval):
+		case <-t.C:
 			if g.reserve(dir, need) {
 				return nil
 			}
+			t.Reset(waitPollInterval)
 		}
 	}
 }
@@ -121,13 +124,13 @@ func humanBytes(n int64) string {
 		return fmt.Sprintf("%d B", n)
 	}
 	v := float64(n)
-	for _, u := range []string{"KiB", "MiB", "GiB", "TiB"} {
+	for _, u := range []string{"KiB", "MiB", "GiB", "TiB", "PiB"} {
 		v /= unit
 		if v < unit {
 			return fmt.Sprintf("%.1f %s", v, u)
 		}
 	}
-	return fmt.Sprintf("%.1f PiB", v)
+	return fmt.Sprintf("%.1f EiB", v/unit)
 }
 
 // reserveOutput checks that the destination filesystem has room for the

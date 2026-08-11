@@ -76,7 +76,16 @@ func TestSpaceGuardAcquireNoWait(t *testing.T) {
 	}
 }
 
+// shortPoll temporarily shortens the replace-mode poll interval for tests.
+func shortPoll(t *testing.T) {
+	t.Helper()
+	orig := waitPollInterval
+	waitPollInterval = 10 * time.Millisecond
+	t.Cleanup(func() { waitPollInterval = orig })
+}
+
 func TestSpaceGuardAcquireWaitUnblockedByRelease(t *testing.T) {
+	shortPoll(t)
 	dir := t.TempDir()
 	g := NewSpaceGuard()
 	free, err := freeSpace(dir)
@@ -100,6 +109,7 @@ func TestSpaceGuardAcquireWaitUnblockedByRelease(t *testing.T) {
 }
 
 func TestSpaceGuardAcquireWaitCancelled(t *testing.T) {
+	shortPoll(t)
 	dir := t.TempDir()
 	g := NewSpaceGuard()
 	free, err := freeSpace(dir)
@@ -171,6 +181,8 @@ func TestHumanBytes(t *testing.T) {
 		5 * 1 << 20:   "5.0 MiB",
 		3 * 1 << 30:   "3.0 GiB",
 		1<<40 + 1<<39: "1.5 TiB",
+		1 << 50:       "1.0 PiB",
+		1 << 60:       "1.0 EiB",
 	} {
 		if got := humanBytes(in); got != want {
 			t.Errorf("humanBytes(%d) = %q, want %q", in, got, want)
