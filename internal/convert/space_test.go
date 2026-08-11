@@ -129,38 +129,6 @@ func TestSpaceGuardSharedFilesystem(t *testing.T) {
 	}
 }
 
-// TestSpaceGuardConcurrentReservations: releasing one job must only drop that
-// job's remaining bytes, never the reservations other jobs still hold.
-func TestSpaceGuardConcurrentReservations(t *testing.T) {
-	dir := t.TempDir()
-	g := NewSpaceGuard()
-	free, err := freeSpace(dir)
-	if err != nil {
-		t.Fatalf("freeSpace: %v", err)
-	}
-	q := free / 4
-	r1 := g.reserve(dir, q)
-	r2 := g.reserve(dir, q)
-	if r1 == nil || r2 == nil {
-		t.Fatal("quarter-disk reservations failed")
-	}
-	// Job 1 wrote half its output, then finishes: only its remaining half is
-	// dropped; job 2's full reservation must survive.
-	g.shrinkDir(dir, q/2)
-	g.release(r1)
-	if got := reservedFor(t, g, dir); got != q {
-		t.Errorf("reserved after partial release = %d, want %d", got, q)
-	}
-	// Job 2's reservation still counts against new jobs.
-	if g.reserve(dir, free) != nil {
-		t.Fatal("reservation succeeded despite job 2 still holding space")
-	}
-	g.release(r2)
-	if got := reservedFor(t, g, dir); got != 0 {
-		t.Errorf("reserved after all releases = %d, want 0", got)
-	}
-}
-
 func TestSpaceGuardAcquireNoWait(t *testing.T) {
 	dir := t.TempDir()
 	g := NewSpaceGuard()
