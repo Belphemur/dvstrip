@@ -184,10 +184,18 @@ func (t *Tracker) Finish(key string) {
 		t.mu.Unlock()
 		return
 	}
-	// Abort works whether the bar completed or not (a failed ffmpeg run
-	// leaves the bar short of its total); BarRemoveOnComplete drops it from
-	// the rendered block at the next refresh.
-	e.bar.Abort(true)
+	if e.bar.AbortedOrCompleted() {
+		// Already done (a determinate bar that reached its total completed on
+		// its own) — nothing more to do; BarRemoveOnComplete drops it.
+	} else if e.total > 0 {
+		// Determinate bar that fell short of its total (failed/interrupted
+		// ffmpeg run): force-complete so the final frame renders as done, not
+		// aborted. BarRemoveOnComplete drops it at the next refresh.
+		e.bar.SetTotal(e.total, true)
+	} else {
+		// Indeterminate spinner (total 0): no completion concept — abort it.
+		e.bar.Abort(true)
+	}
 	delete(t.bar, key)
 	t.mu.Unlock()
 	t.logf("done: %s", e.label)
