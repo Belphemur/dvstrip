@@ -108,6 +108,7 @@ func TestWriterAfterClose(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
+		<-gate
 		tr.Close()
 	}()
 	go func() {
@@ -115,7 +116,7 @@ func TestWriterAfterClose(t *testing.T) {
 		_, err := tr.Writer().Write([]byte("late log\n"))
 		errCh <- err
 	}()
-	close(gate)
+	close(gate) // release Close and Write together so they actually race
 	<-done
 	if err := <-errCh; err != nil {
 		t.Fatalf("write racing Close must not error: %v", err)
