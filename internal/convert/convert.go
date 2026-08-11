@@ -53,11 +53,12 @@ type Progress interface {
 	Finish(key string)
 }
 
-// Options controls output naming and progress reporting.
+// Options controls output naming, progress reporting and disk-space checks.
 type Options struct {
 	Suffix   string
-	Replace  bool     // overwrite the original after a verified conversion
-	Progress Progress // nil disables per-file progress display
+	Replace  bool        // overwrite the original after a verified conversion
+	Progress Progress    // nil disables per-file progress display
+	Space    *SpaceGuard // nil disables the free-space check
 }
 
 // finalPath is where the converted file ends up.
@@ -110,22 +111,23 @@ func parseProgressBytes(line string) (int64, bool) {
 	return n, err == nil
 }
 
-// barLabel builds the per-file bar description "<basename> · <phase>",
-// truncating long release names so they don't eat the whole bar width.
-func barLabel(src probe.Info, phase string) string {
+// barLabel builds the per-file bar description — just the basename, so the
+// bar reads "[elapsed] : MY_FILE.mkv ████ 61% | …", truncating long release
+// names so they don't eat the whole bar width.
+func barLabel(src probe.Info) string {
 	name := filepath.Base(src.Path)
 	const maxNameLen = 100
 	if len(name) > maxNameLen {
 		name = name[:maxNameLen-3] + "..."
 	}
-	return name + " · " + phase
+	return name
 }
 
 // runFFmpeg runs ffmpeg with -nostats and, when a Progress sink is set,
 // streams machine-readable -progress output into a per-file bar keyed by the
 // source path. ffmpeg stderr is captured and attached to any returned error
 // instead of being dumped raw onto the terminal.
-func runFFmpeg(ctx context.Context, src probe.Info, o Options, label string, args ...string) error {
+func runFFmpeg(ctx context.Context, src probe.Info, o Options, args ...string) error {
 	if o.Progress == nil {
 		return run(ctx, "ffmpeg", args...)
 	}
@@ -144,29 +146,35 @@ func runFFmpeg(ctx context.Context, src probe.Info, o Options, label string, arg
 	if st, statErr := os.Stat(src.Path); statErr == nil {
 		total = st.Size()
 	}
-	o.Progress.Start(src.Path, barLabel(src, label), total)
+	o.Progress.Start(src.Path, barLabel(src), total)
 	defer o.Progress.Finish(src.Path)
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start ffmpeg: %w", err)
 	}
 
+	var written int64
 	scanner := bufio.NewScanner(stdout)
 	scanner.Buffer(make([]byte, 64*1024), 1024*1024)
 	for scanner.Scan() {
 		if n, ok := parseProgressBytes(scanner.Text()); ok {
+			// Keep the space reservation in sync with what ffmpeg has
+			// actually written so far, so the projected final free space
+			// stays accurate for jobs still waiting to start.
+			o.accountWritten(src.Path, n-written)
+			written = n
 			o.Progress.Set(src.Path, n)
 		}
 	}
 	if err := cmd.Wait(); err != nil {
-		return fmt.Errorf("ffmpeg %s: %w: %s", label, err, strings.TrimSpace(errBuf.String()))
+		return fmt.Errorf("ffmpeg: %w: %s", err, strings.TrimSpace(errBuf.String()))
 	}
 	return nil
 }
 
 // runSpinner runs a progress-less command (dovi_tool) under a spinner bar
 // when a Progress sink is set.
-func runSpinner(ctx context.Context, src probe.Info, o Options, label, name string, args ...string) error {
+func runSpinner(ctx context.Context, src probe.Info, o Options, name string, args ...string) error {
 	if o.Progress == nil {
 		return run(ctx, name, args...)
 	}
@@ -174,7 +182,7 @@ func runSpinner(ctx context.Context, src probe.Info, o Options, label, name stri
 	cmd := exec.CommandContext(ctx, name, args...)
 	cmd.Stdout, cmd.Stderr = io.Discard, &errBuf
 
-	o.Progress.StartSpinner(src.Path, barLabel(src, label))
+	o.Progress.StartSpinner(src.Path, barLabel(src))
 	defer o.Progress.Finish(src.Path)
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("%s: %w: %s", name, err, strings.TrimSpace(errBuf.String()))
@@ -247,10 +255,16 @@ func stripArgs(in, tmp string) []string {
 // behind. After a successful publish the tmp has already been renamed away,
 // making the deferred removal a harmless no-op.
 func StripDV(ctx context.Context, src probe.Info, o Options) (string, error) {
+	release, err := o.reserveOutput(ctx, src.Path)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+
 	tmp := tmpPath(src.Path)
 	defer func() { _ = os.Remove(tmp) }()
 
-	if err := runFFmpeg(ctx, src, o, "strip DV", stripArgs(src.Path, tmp)...); err != nil {
+	if err := runFFmpeg(ctx, src, o, stripArgs(src.Path, tmp)...); err != nil {
 		return "", err
 	}
 	return publish(ctx, src, o)
@@ -277,7 +291,7 @@ func P5(ctx context.Context, src probe.Info, o Options) (string, error) {
 	p8 := filepath.Join(dir, "p8.hevc")
 
 	// 1) extract raw annex-b HEVC video.
-	if err := runFFmpeg(ctx, src, o, "extract HEVC",
+	if err := runFFmpeg(ctx, src, o,
 		"-hide_banner", "-loglevel", "error", flagNoStats, "-y",
 		"-i", src.Path, flagMap, "0:v:0", "-c:v", "copy",
 		"-bsf:v", "hevc_mp4toannexb", "-f", "hevc", bl); err != nil {
@@ -285,13 +299,20 @@ func P5(ctx context.Context, src probe.Info, o Options) (string, error) {
 	}
 
 	// 2) reshape RPU: profile 5 -> 8.1, drop the enhancement layer.
-	if err := runSpinner(ctx, src, o, "dovi_tool P5→P8.1",
+	if err := runSpinner(ctx, src, o,
 		"dovi_tool", "-m", "2", "convert", "--discard", bl, "-o", p8); err != nil {
 		return "", fmt.Errorf("dovi_tool convert: %w", err)
 	}
 
-	// 3) remux: video from the converted stream, audio/subs/chapters from the
-	//    original, DV metadata stripped, marker stamped.
+	// 3) reserve destination space, then remux: video from the converted
+	//    stream, audio/subs/chapters from the original, DV metadata
+	//    stripped, marker stamped.
+	release, err := o.reserveOutput(ctx, src.Path)
+	if err != nil {
+		return "", err
+	}
+	defer release()
+
 	tmp := tmpPath(src.Path)
 	defer func() { _ = os.Remove(tmp) }()
 	args := []string{
@@ -305,7 +326,7 @@ func P5(ctx context.Context, src probe.Info, o Options) (string, error) {
 	}
 	args = append(args, markerArgs("dv-p5", "hdr10")...)
 	args = append(args, tmp)
-	if err := runFFmpeg(ctx, src, o, "remux + strip", args...); err != nil {
+	if err := runFFmpeg(ctx, src, o, args...); err != nil {
 		return "", err
 	}
 	return publish(ctx, src, o)

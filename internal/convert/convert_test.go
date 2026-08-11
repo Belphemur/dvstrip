@@ -109,15 +109,15 @@ func TestParseProgressBytes(t *testing.T) {
 }
 
 func TestBarLabel(t *testing.T) {
-	short := barLabel(probe.Info{Path: "/x/movie.mkv"}, "strip DV")
-	if short != "movie.mkv · strip DV" {
+	short := barLabel(probe.Info{Path: "/x/movie.mkv"})
+	if short != "movie.mkv" {
 		t.Errorf("short label = %q", short)
 	}
-	long := barLabel(probe.Info{Path: "/x/" + strings.Repeat("a", 100) + ".mkv"}, "strip DV")
-	if len(long) > 100+len(" · strip DV") {
+	long := barLabel(probe.Info{Path: "/x/" + strings.Repeat("a", 100) + ".mkv"})
+	if len(long) > 100 {
 		t.Errorf("label not truncated: %d chars", len(long))
 	}
-	if !strings.Contains(long, "... · strip DV") {
+	if !strings.HasSuffix(long, "...") {
 		t.Errorf("truncated label missing ellipsis: %q", long)
 	}
 }

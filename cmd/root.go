@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/Belphemur/dvstrip/internal/convert"
 	"github.com/Belphemur/dvstrip/internal/display"
 
 	"github.com/rs/zerolog"
@@ -23,10 +24,13 @@ import (
 
 // pkg is the package-wide logger; rebuilt from flags/config in setupLogging.
 // tracker renders per-file progress bars; nil when progress is disabled.
-// Both are written through by every command and worker, never via fmt.Print*.
+// spaceGuard keeps concurrent conversions from collectively exceeding the
+// free disk space. All three are written through by every command and
+// worker, never via fmt.Print*.
 var (
-	pkg     = zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339}).With().Timestamp().Logger()
-	tracker *display.Tracker
+	pkg        = zerolog.New(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339}).With().Timestamp().Logger()
+	tracker    *display.Tracker
+	spaceGuard = convert.NewSpaceGuard()
 )
 
 var cfgFile string
