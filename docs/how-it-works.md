@@ -130,7 +130,7 @@ Progress display is on by default (`--no-progress` opts out; `--log-json` forces
 1. ffmpeg runs with `-nostats -progress pipe:1`, emitting machine-readable `key=value` blocks.
 2. `convert.runFFmpeg` parses `total_size=N` lines and feeds them into `internal/display.Tracker`, keyed by file path (bar max = source file size; stream-copy output ≈ input, so the estimate is accurate). The bar description is just the file's basename, followed by percent, humanized `current/total` bytes, rate and `[elapsed:eta]` — the phase adds nothing when every bar belongs to the same pipeline.
 3. `dovi_tool` (no progress output) gets an indeterminate spinner instead.
-4. The tracker renders every active bar as its own line at the bottom of the terminal (ANSI cursor-up + clear-line redraw at 120 ms). **All log writes go through the tracker's writer**, which clears the bar block before printing and schedules a redraw — so logs and bars never interleave.
+4. The tracker renders every active bar as its own line at the bottom of the terminal (via [mpb](https://github.com/vbauerster/mpb), which redraws the bar block in place). **All log writes go through the tracker's writer**, which prints them above the bars — so logs and bars never interleave. On a non-TTY (docker logs, redirected stderr, CI) mpb renders nothing; instead the tracker emits a `progress: <file> N%` log line each time a bar crosses a 10% milestone, so captured logs stay clean while still showing progress.
 
 ## 7. Disk-space gating
 
@@ -150,5 +150,5 @@ A conversion never starts until the destination filesystem provably has room for
 | `cmd/watch.go` | fsnotify loop, debounce, `--full-scan` |
 | `internal/probe` | ffprobe wrapper (`Probe`) + pure parser/classifier (`Parse`, `Info.Action`) |
 | `internal/convert` | `StripDV`, `P5`, ffmpeg progress plumbing, tmp/verify/publish, `SpaceGuard` disk-space ledger |
-| `internal/display` | multi-bar terminal renderer (one line per in-flight conversion) |
+| `internal/display` | multi-bar progress (mpb): one line per in-flight conversion on a TTY; 10% milestone log lines on non-TTY |
 | `internal/queue` | worker pool, dedup, `AutoWorkers` |

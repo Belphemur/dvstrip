@@ -51,7 +51,7 @@ docker run -d \
 - `--full-scan` processes the backlog once, then watches for new files.
 - `--debounce 30s` avoids touching files still being copied (SMB/NFS copies of 50GB remuxes take minutes).
 - `--log-json` makes `docker logs` machine-parseable.
-- **Progress bars are on by default.** Without `docker run -t` (no TTY) they still render but emit ANSI control codes into the logs — pass `--no-progress` or `--log-json` for clean non-interactive logs.
+- **Progress bars are on by default.** With a TTY (`docker run -t`) each in-flight conversion gets its own bar, redrawn in place. Without a TTY the bars don't render — instead a `progress: <file> N%` log line is emitted every 10%, so captured logs stay clean (no ANSI control codes, no per-redraw line spam) while still showing progress. Pass `--no-progress` or `--log-json` to silence progress entirely.
 
 ## docker-compose
 
