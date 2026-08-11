@@ -15,7 +15,6 @@ package display
 import (
 	"fmt"
 	"io"
-	"os"
 	"sync"
 	"time"
 
@@ -47,13 +46,19 @@ type Tracker struct {
 	tty bool
 	mu  sync.Mutex
 	bar map[string]*entry
+
+	outMu  sync.Mutex // serializes every direct write to out
+	closed bool       // set by Close; direct out writes afterwards are dropped
 }
 
 // New starts a Tracker rendering to out (normally os.Stderr). When out is not
 // a terminal, bars don't render and milestone log lines are emitted instead.
 func New(out io.Writer) *Tracker {
 	tty := false
-	if f, ok := out.(*os.File); ok {
+	// Any writer exposing a file descriptor (not just *os.File) gets a TTY
+	// check; everything else (buffers, pipes wrapped in structs, …) is
+	// treated as non-TTY.
+	if f, ok := out.(interface{ Fd() uintptr }); ok {
 		tty = isatty.IsTerminal(f.Fd()) || isatty.IsCygwinTerminal(f.Fd())
 	}
 	return &Tracker{
@@ -66,7 +71,8 @@ func New(out io.Writer) *Tracker {
 
 // Close shuts the renderer down: every registered bar is dropped and the
 // container is stopped (Shutdown — not Wait — so bars that never completed
-// don't block). Log lines written through Writer after Close are discarded.
+// don't block). Log lines written through Writer after Close are discarded
+// on both TTY and non-TTY outputs.
 func (t *Tracker) Close() {
 	t.mu.Lock()
 	for k, e := range t.bar {
@@ -75,6 +81,9 @@ func (t *Tracker) Close() {
 	}
 	t.mu.Unlock()
 	t.p.Shutdown()
+	t.outMu.Lock()
+	t.closed = true
+	t.outMu.Unlock()
 }
 
 // Writer returns the writer log output must go through: on a TTY each write
@@ -90,6 +99,13 @@ func (w writer) Write(p []byte) (int, error) {
 	// is no refresh tick), so log lines must go straight to out — otherwise
 	// they would be swallowed.
 	if !w.t.tty {
+		w.t.outMu.Lock()
+		defer w.t.outMu.Unlock()
+		if w.t.closed {
+			// Acknowledge but discard: log lines racing Close must not turn
+			// into zerolog errors — they are progress-adjacent, not critical.
+			return len(p), nil
+		}
 		return w.t.out.Write(p)
 	}
 	// TTY: route through mpb so the line is printed above the running bars.
@@ -102,9 +118,14 @@ func (w writer) Write(p []byte) (int, error) {
 }
 
 // logf writes a single milestone/notice line to the output on non-TTY. It is
-// a no-op on a TTY, where bars already convey progress.
+// a no-op on a TTY, where bars already convey progress, and after Close.
 func (t *Tracker) logf(format string, args ...any) {
 	if t.tty {
+		return
+	}
+	t.outMu.Lock()
+	defer t.outMu.Unlock()
+	if t.closed {
 		return
 	}
 	_, _ = fmt.Fprintf(t.out, format+"\n", args...)
@@ -184,17 +205,16 @@ func (t *Tracker) Finish(key string) {
 		t.mu.Unlock()
 		return
 	}
-	if e.bar.AbortedOrCompleted() {
-		// Already done (a determinate bar that reached its total completed on
-		// its own) — nothing more to do; BarRemoveOnComplete drops it.
-	} else if e.total > 0 {
-		// Determinate bar that fell short of its total (failed/interrupted
-		// ffmpeg run): force-complete so the final frame renders as done, not
-		// aborted. BarRemoveOnComplete drops it at the next refresh.
-		e.bar.SetTotal(e.total, true)
-	} else {
-		// Indeterminate spinner (total 0): no completion concept — abort it.
-		e.bar.Abort(true)
+	if !e.bar.AbortedOrCompleted() {
+		if e.total > 0 {
+			// Determinate bar that fell short of its total (failed/interrupted
+			// ffmpeg run): force-complete so the final frame renders as done, not
+			// aborted. BarRemoveOnComplete drops it at the next refresh.
+			e.bar.SetTotal(e.total, true)
+		} else {
+			// Indeterminate spinner (total 0): no completion concept — abort it.
+			e.bar.Abort(true)
+		}
 	}
 	delete(t.bar, key)
 	t.mu.Unlock()

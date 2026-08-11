@@ -21,7 +21,16 @@ func TestNonTTYRendersNothing(t *testing.T) {
 	}
 	tr.Finish("/x/movie.mkv")
 
+	// A normal log line written through Writer before Close must pass
+	// through: non-TTY bar suppression must not swallow regular logs.
+	if _, err := tr.Writer().Write([]byte("log line through writer\n")); err != nil {
+		t.Fatalf("write before Close must not error: %v", err)
+	}
+
 	out := buf.String()
+	if !strings.Contains(out, "log line through writer") {
+		t.Fatalf("Writer output before Close must pass through, got %q", out)
+	}
 	if strings.Contains(out, "\x1b[") {
 		t.Fatalf("non-TTY output must not contain ANSI escapes, got %q", out)
 	}
@@ -87,15 +96,29 @@ func TestNonTTYMilestoneSkipsJumpedSteps(t *testing.T) {
 	}
 }
 
-// TestWriterAfterClose pins the shutdown race: log lines racing Close must be
-// acknowledged (so zerolog never errors) and must not panic.
+// TestWriterAfterClose pins the shutdown race: a log line racing Close must
+// be acknowledged (so zerolog never errors) and must not panic — run with
+// the race detector to cover the concurrent Close/Write paths.
 func TestWriterAfterClose(t *testing.T) {
 	tr := New(&bytes.Buffer{})
 	tr.Start("/x/movie.mkv", "movie.mkv", 100)
-	tr.Close()
 
-	if _, err := tr.Writer().Write([]byte("late log\n")); err != nil {
-		t.Fatalf("write after Close must not error: %v", err)
+	gate := make(chan struct{})
+	errCh := make(chan error, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		tr.Close()
+	}()
+	go func() {
+		<-gate
+		_, err := tr.Writer().Write([]byte("late log\n"))
+		errCh <- err
+	}()
+	close(gate)
+	<-done
+	if err := <-errCh; err != nil {
+		t.Fatalf("write racing Close must not error: %v", err)
 	}
 	tr.Finish("/x/movie.mkv") // must not panic on an unknown key
 }
