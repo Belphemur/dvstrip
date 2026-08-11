@@ -10,7 +10,7 @@ Why? Many players (older TVs, some media servers without a DV license) mishandle
 
 Processed files are stamped with a container-level `dvstrip` tag so re-runs skip them automatically, and `--replace` mode overwrites the original **only after the output has been verified** (probe succeeds, resolution unchanged, DV gone, marker present) via an atomic rename.
 
-Every conversion shows a live per-file progress bar (file name, bytes processed via ffmpeg's machine-readable progress, ETA included), one line per concurrent worker:
+Every conversion shows a live per-file progress bar (file name, percent, humanized bytes written vs. source size, ETA included), one line per concurrent worker:
 
 ```
 [18m10s] : MY_FILE.mkv  ██████████████░░░░░░  61% | 34.2 GiB/55.8 GiB | ETA 2m14s

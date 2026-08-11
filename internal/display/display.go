@@ -95,6 +95,7 @@ func (t *Tracker) Start(key, label string, total int64) {
 	bar := progressbar.NewOptions64(total,
 		progressbar.OptionSetDescription(label),
 		progressbar.OptionSetWriter(io.Discard), // rendered via String()
+		progressbar.OptionShowCount(),           // needed for the humanized bytes line below
 		progressbar.OptionShowBytes(true),
 		progressbar.OptionShowTotalBytes(true),
 		progressbar.OptionSetPredictTime(true),
