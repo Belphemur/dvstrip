@@ -70,15 +70,9 @@ func freeSpace(path string) (int64, error) {
 	return int64(st.Bavail) * int64(st.Bsize), nil //nolint:gosec // bavail*bsize fits int64 on every supported platform
 }
 
-// fsKey returns the identity of the filesystem holding path — the statfs
-// Fsid pair — so directories sharing a mount share one ledger entry.
-func fsKey(path string) (string, error) {
-	var st syscall.Statfs_t
-	if err := syscall.Statfs(path, &st); err != nil {
-		return "", err
-	}
-	return fmt.Sprintf("%x:%x", uint64(st.Fsid.X__val[0]), uint64(st.Fsid.X__val[1])), nil
-}
+// fsKey (fsid_linux.go / fsid_darwin.go) returns the identity of the
+// filesystem holding a path — the statfs Fsid pair — so directories sharing
+// a mount share one ledger entry.
 
 // reserve registers need extra bytes for dir, succeeding only while the
 // projected space left after every running job finishes stays non-negative —
