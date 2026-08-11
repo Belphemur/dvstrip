@@ -10,11 +10,13 @@ Why? Many players (older TVs, some media servers without a DV license) mishandle
 
 Processed files are stamped with a container-level `dvstrip` tag so re-runs skip them automatically, and `--replace` mode overwrites the original **only after the output has been verified** (probe succeeds, resolution unchanged, DV gone, marker present) via an atomic rename.
 
-Every conversion shows a live per-file progress bar (bytes processed via ffmpeg's machine-readable progress, ETA included), one line per concurrent worker:
+Every conversion shows a live per-file progress bar (file name, percent, humanized bytes written vs. source size, ETA included), one line per concurrent worker:
 
+```text
+[18m10s] : MY_FILE.mkv  ██████████████░░░░░░  61% | 34.2 GiB/55.8 GiB | ETA 2m14s
 ```
-strip DV ██████████████░░░░░░  61% | 34.2 GiB/55.8 GiB | ETA 2m14s
-```
+
+Before any conversion starts, dvstrip checks that the destination filesystem has room for the output **on top of what the already-running jobs still need** (source size + 5% headroom per job, shrinking as bytes land on disk). In `--replace` mode the extra space is only temporary — the original is freed by the final rename — so a job simply **waits** until enough space frees up. In side-by-side mode (default) the output is a permanent extra file, so insufficient space is a hard per-file **error** instead of letting the disk run out mid-remux.
 
 ## Quick start
 
@@ -79,7 +81,7 @@ Install from source: `go install github.com/Belphemur/dvstrip@latest`
 | `-w, --workers` | `0` (auto) | Concurrent ffmpeg workers; `0` = `NumCPU/2` clamped to `[2,8]` |
 | `--dry-run` | `false` | Classify only, never touch files |
 | `--force` | `false` | Reprocess files even if the `dvstrip` marker tag is present |
-| `--replace` | `false` | Overwrite the original after a verified conversion |
+| `--replace` | `false` | Overwrite the original after a verified conversion (extra space is only temporary: a job waits for room instead of failing) |
 | `--suffix` | `.hdr10` | Output suffix before the extension (ignored with `--replace`) |
 | `--p5-mode` | `convert` | DV profile 5 handling: `convert` \| `skip` |
 | `--hdr10plus` | `false` | Preserve HDR10+ when present, fall back to HDR10 otherwise |

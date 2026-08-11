@@ -128,9 +128,16 @@ All log output goes through a single zerolog instance configured in `cmd/root.go
 Progress display is on by default (`--no-progress` opts out; `--log-json` forces it off). ffmpeg never uses `-stats` — the raw `frame=…` line is what used to garble the log stream. Instead:
 
 1. ffmpeg runs with `-nostats -progress pipe:1`, emitting machine-readable `key=value` blocks.
-2. `convert.runFFmpeg` parses `total_size=N` lines and feeds them into `internal/display.Tracker`, keyed by file path (bar max = source file size; stream-copy output ≈ input, so the estimate is accurate).
+2. `convert.runFFmpeg` parses `total_size=N` lines and feeds them into `internal/display.Tracker`, keyed by file path (bar max = source file size; stream-copy output ≈ input, so the estimate is accurate). The bar description is just the file's basename, followed by percent, humanized `current/total` bytes, rate and `[elapsed:eta]` — the phase adds nothing when every bar belongs to the same pipeline.
 3. `dovi_tool` (no progress output) gets an indeterminate spinner instead.
 4. The tracker renders every active bar as its own line at the bottom of the terminal (ANSI cursor-up + clear-line redraw at 120 ms). **All log writes go through the tracker's writer**, which clears the bar block before printing and schedules a redraw — so logs and bars never interleave.
+
+## 7. Disk-space gating
+
+A conversion never starts until the destination filesystem provably has room for it. `internal/convert.SpaceGuard` (one instance shared by all workers via `Options.Space`) keeps a per-directory ledger of the bytes the **running** jobs still need (source size + 5% headroom, shrunk as ffmpeg reports bytes written). A new job may start only while `free − Σ(reserved) ≥ need`, so parallel workers can never collectively overrun the disk — the check looks at the projected final space left, not just the instantaneous free bytes.
+
+- **`--replace`**: the extra space is temporary (the verified rename frees the original), so a job that doesn't fit yet **waits**, re-checking every 5 s until other jobs finish or Ctrl-C cancels it.
+- **side-by-side (default)**: the output permanently adds a second file, so a failed check is an immediate per-file `ErrNoSpace` failure instead of letting ffmpeg die with ENOSPC mid-remux.
 
 ## Where things live
 
@@ -142,6 +149,6 @@ Progress display is on by default (`--no-progress` opts out; `--log-json` forces
 | `cmd/scan.go` | recursive one-shot scan |
 | `cmd/watch.go` | fsnotify loop, debounce, `--full-scan` |
 | `internal/probe` | ffprobe wrapper (`Probe`) + pure parser/classifier (`Parse`, `Info.Action`) |
-| `internal/convert` | `StripDV`, `P5`, ffmpeg progress plumbing, tmp/verify/publish |
+| `internal/convert` | `StripDV`, `P5`, ffmpeg progress plumbing, tmp/verify/publish, `SpaceGuard` disk-space ledger |
 | `internal/display` | multi-bar terminal renderer (one line per in-flight conversion) |
 | `internal/queue` | worker pool, dedup, `AutoWorkers` |

@@ -4,7 +4,7 @@
 workers: 0          # 0 = auto (NumCPU/2, clamped to 2..8)
 dry-run: false      # true: classify only, never touch files
 force: false        # true: reprocess files even if the dvstrip marker tag is present
-replace: false      # true: overwrite the original after a verified conversion
+replace: false      # true: overwrite the original after a verified conversion (a job then waits for free space instead of failing)
 suffix: ".hdr10"    # output suffix before the extension (ignored with replace)
 p5-mode: convert    # how to handle DV profile 5: convert | skip
 hdr10plus: true     # preserve HDR10+ when present, fall back to HDR10 otherwise

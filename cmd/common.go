@@ -94,11 +94,13 @@ func submitDir(q *queue.Queue, dir string) error {
 
 // convertOptions builds the shared Options struct from viper config. The
 // progress tracker is only attached when it exists — a nil *Tracker stored in
-// the Progress interface would not compare == nil.
+// the Progress interface would not compare == nil. All conversions share one
+// SpaceGuard so concurrent workers see each other's projected space usage.
 func convertOptions() convert.Options {
 	o := convert.Options{
 		Suffix:  viper.GetString("suffix"),
 		Replace: viper.GetBool("replace"),
+		Space:   spaceGuard,
 	}
 	if tracker != nil {
 		o.Progress = tracker
