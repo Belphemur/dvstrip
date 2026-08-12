@@ -47,26 +47,61 @@ func TestIsTemp(t *testing.T) {
 
 func TestStripArgs(t *testing.T) {
 	tmp := "/in/.swp.dvstrip.movie.mkv"
-	args := stripArgs("/in/movie.mkv", tmp)
-	joined := strings.Join(args, " ")
 
-	// The HEVC-only filter must be pinned to the probed stream: a bare
-	// -bsf:v also hits attached mjpeg covers, which reject it (exit 234).
-	if !slices.Contains(args, "-bsf:v:0") {
-		t.Errorf("missing -bsf:v:0 pinning: %s", joined)
-	}
-	if slices.Contains(args, "-bsf:v") {
-		t.Errorf("bare -bsf:v must not be used (breaks on attached covers): %s", joined)
-	}
-	// ffmpeg guesses the output muxer from the last argument's extension.
-	if args[len(args)-1] != tmp {
-		t.Errorf("output path must be the last argument, got %q", args[len(args)-1])
-	}
-	for _, want := range []string{"-nostats", "-map 0", "-c copy", bsfRemoveDovi, probe.MarkerKey + "=1"} {
-		if !strings.Contains(joined, want) {
-			t.Errorf("args missing %q: %s", want, joined)
+	t.Run("hevc", func(t *testing.T) {
+		bsf, err := bsfForCodec("hevc")
+		if err != nil {
+			t.Fatalf("bsfForCodec(hevc): %v", err)
 		}
-	}
+		args := stripArgs("/in/movie.mkv", tmp, bsf)
+		joined := strings.Join(args, " ")
+
+		// The filter must be pinned to the probed stream: a bare
+		// -bsf:v also hits attached mjpeg covers, which reject it (exit 234).
+		if !slices.Contains(args, "-bsf:v:0") {
+			t.Errorf("missing -bsf:v:0 pinning: %s", joined)
+		}
+		if slices.Contains(args, "-bsf:v") {
+			t.Errorf("bare -bsf:v must not be used (breaks on attached covers): %s", joined)
+		}
+		// ffmpeg guesses the output muxer from the last argument's extension.
+		if args[len(args)-1] != tmp {
+			t.Errorf("output path must be the last argument, got %q", args[len(args)-1])
+		}
+		for _, want := range []string{"-nostats", "-map 0", "-c copy", bsfRemoveDoviHEVC, probe.MarkerKey + "=1"} {
+			if !strings.Contains(joined, want) {
+				t.Errorf("args missing %q: %s", want, joined)
+			}
+		}
+	})
+
+	t.Run("av1", func(t *testing.T) {
+		bsf, err := bsfForCodec("av1")
+		if err != nil {
+			t.Fatalf("bsfForCodec(av1): %v", err)
+		}
+		args := stripArgs("/in/movie.mkv", tmp, bsf)
+		joined := strings.Join(args, " ")
+
+		if !slices.Contains(args, "-bsf:v:0") {
+			t.Errorf("missing -bsf:v:0 pinning: %s", joined)
+		}
+		for _, want := range []string{"-nostats", "-map 0", "-c copy", bsfRemoveDoviAV1, probe.MarkerKey + "=1"} {
+			if !strings.Contains(joined, want) {
+				t.Errorf("args missing %q: %s", want, joined)
+			}
+		}
+	})
+
+	t.Run("unsupported codec", func(t *testing.T) {
+		_, err := bsfForCodec("vp9")
+		if err == nil {
+			t.Fatal("expected error for unsupported codec")
+		}
+		if !strings.Contains(err.Error(), "unsupported") {
+			t.Errorf("error should mention unsupported: %v", err)
+		}
+	})
 }
 
 func TestVerifyOutput(t *testing.T) {

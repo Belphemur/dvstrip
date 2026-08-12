@@ -29,11 +29,13 @@ Dolby Vision is advertised in a `DOVI configuration record` side-data entry, whi
 
 | Profile | Typical source | Base layer | Compat ID | dvstrip action |
 |---|---|---|---|---|
-| 7.6 | UHD Blu-ray remux | HDR10 (BL + enhancement layer, possibly dual-layer MEL/FEL) | 6 | **Strip** — BL is genuine HDR10 |
-| 8.1 | Web/streaming DL | HDR10 single layer | 1 | **Strip** — BL is genuine HDR10 |
+| 7.6 | UHD Blu-ray remux (HEVC) | HDR10 (BL + enhancement layer, possibly dual-layer MEL/FEL) | 6 | **Strip** — BL is genuine HDR10 |
+| 8.1 | Web/streaming DL (HEVC or AV1) | HDR10 single layer | 1 | **Strip** — BL is genuine HDR10 |
 | 8.2 | Streaming | SDR base layer | 2 | Warn/manual (not HDR10 underneath) |
 | 8.4 | Streaming | HLG base layer | 4 | Warn/manual |
 | 5 | Streaming (Apple TV, etc.) | **Not** HDR10 — proprietary IPTPQc2 color | 0 | **Convert**: reshape RPU to P8.1 via `dovi_tool -m 2 convert --discard`, then strip |
+
+**Note on AV1**: Dolby Vision in AV1 is carried as ITU-T T.35 metadata OBUs (not HEVC NAL units). Stripping requires ffmpeg ≥ 9.0 (`dovi_rpu=strip=1` bitstream filter) — the older `hevc_metadata=remove_dovi=1` only works for HEVC.
 
 ```mermaid
 flowchart TD

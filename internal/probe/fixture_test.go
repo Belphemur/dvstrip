@@ -11,7 +11,7 @@ const (
 // ffprobeJSON builds a minimal ffprobe JSON document with a single video
 // stream and optional side data + format tags, for parse tests only.
 // dvProfile < 0 means "no DOVI side data".
-func ffprobeJSON(width, height int, transfer, primaries string, dvProfile int, dvCompat int, hdr10plus bool, formatTags map[string]string) []byte {
+func ffprobeJSON(width, height int, codec, transfer, primaries string, dvProfile int, dvCompat int, hdr10plus bool, formatTags map[string]string) []byte {
 	var sd []map[string]any
 	if dvProfile >= 0 {
 		sd = append(sd, map[string]any{
@@ -30,7 +30,7 @@ func ffprobeJSON(width, height int, transfer, primaries string, dvProfile int, d
 
 	doc := map[string]any{
 		"streams": []map[string]any{{
-			"codec_name":      "hevc",
+			"codec_name":      codec,
 			"codec_type":      "video",
 			"width":           width,
 			"height":          height,
@@ -49,12 +49,15 @@ func ffprobeJSON(width, height int, transfer, primaries string, dvProfile int, d
 
 // Cases map to the cmd decision matrix.
 var fixtures = map[string][]byte{
-	"p4k_hdr10_dv":     ffprobeJSON(3840, 2160, pqTransfer, bt2020, 7, 6, false, nil),
-	"p4k_hdr10_dv_p81": ffprobeJSON(3840, 2160, pqTransfer, bt2020, 8, 1, false, nil),
-	"p4k_p5":           ffprobeJSON(3840, 2160, pqTransfer, bt2020, 5, 0, false, nil),
-	"p4k_hdr10_plain":  ffprobeJSON(3840, 2160, pqTransfer, bt2020, -1, 0, false, nil),
-	"p4k_sdr":          ffprobeJSON(3840, 2160, "bt709", "bt709", -1, 0, false, nil),
-	"fullhdr10plus":    ffprobeJSON(3840, 2160, pqTransfer, bt2020, -1, 0, true, nil),
-	"already_marked": ffprobeJSON(3840, 2160, pqTransfer, bt2020, -1, 0, false,
+	"p4k_hdr10_dv":     ffprobeJSON(3840, 2160, "hevc", pqTransfer, bt2020, 7, 6, false, nil),
+	"p4k_hdr10_dv_p81": ffprobeJSON(3840, 2160, "hevc", pqTransfer, bt2020, 8, 1, false, nil),
+	"p4k_p5":           ffprobeJSON(3840, 2160, "hevc", pqTransfer, bt2020, 5, 0, false, nil),
+	"p4k_hdr10_plain":  ffprobeJSON(3840, 2160, "hevc", pqTransfer, bt2020, -1, 0, false, nil),
+	"p4k_sdr":          ffprobeJSON(3840, 2160, "hevc", "bt709", "bt709", -1, 0, false, nil),
+	"fullhdr10plus":    ffprobeJSON(3840, 2160, "hevc", pqTransfer, bt2020, -1, 0, true, nil),
+	"av1_hdr10_dv":     ffprobeJSON(3840, 2160, "av1", pqTransfer, bt2020, 8, 1, false, nil),
+	"av1_hdr10_dv_p7":  ffprobeJSON(3840, 2160, "av1", pqTransfer, bt2020, 7, 6, true, nil),
+	"av1_hdr10_plain":  ffprobeJSON(3840, 2160, "av1", pqTransfer, bt2020, -1, 0, false, nil),
+	"already_marked": ffprobeJSON(3840, 2160, "hevc", pqTransfer, bt2020, -1, 0, false,
 		map[string]string{"dvstrip": "1", "comment": "dvstrip: hdr10 -> normalized"}),
 }

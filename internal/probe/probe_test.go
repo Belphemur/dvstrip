@@ -4,23 +4,28 @@ import "testing"
 
 func TestParseActionMatrix(t *testing.T) {
 	cases := []struct {
-		name   string
-		is4k   bool
-		hdr10  bool
-		dv     bool
-		dv5    bool
-		compat bool
-		hdr10p bool
-		proc   bool
-		action string
+		name    string
+		is4k    bool
+		hdr10   bool
+		dv      bool
+		dv5     bool
+		compat  bool
+		hdr10p  bool
+		proc    bool
+		av1     bool
+		stripOk bool
+		action  string
 	}{
-		{"p4k_hdr10_dv", true, true, true, false, true, false, false, ActionStripDV},
-		{"p4k_hdr10_dv_p81", true, true, true, false, true, false, false, ActionStripDV},
-		{"p4k_p5", true, true, true, true, false, false, false, ActionConvertP5},
-		{"p4k_hdr10_plain", true, true, false, false, false, false, false, ActionNone},
-		{"p4k_sdr", true, false, false, false, false, false, false, ActionSkipNotHDR10},
-		{"fullhdr10plus", true, true, false, false, false, true, false, ActionNone},
-		{"already_marked", true, true, false, false, false, false, true, ActionSkipMarked},
+		{"p4k_hdr10_dv", true, true, true, false, true, false, false, false, true, ActionStripDV},
+		{"p4k_hdr10_dv_p81", true, true, true, false, true, false, false, false, true, ActionStripDV},
+		{"p4k_p5", true, true, true, true, false, false, false, false, true, ActionConvertP5},
+		{"p4k_hdr10_plain", true, true, false, false, false, false, false, false, true, ActionNone},
+		{"p4k_sdr", true, false, false, false, false, false, false, false, true, ActionSkipNotHDR10},
+		{"fullhdr10plus", true, true, false, false, false, true, false, false, true, ActionNone},
+		{"av1_hdr10_dv", true, true, true, false, true, false, false, true, true, ActionStripDV},
+		{"av1_hdr10_dv_p7", true, true, true, false, true, true, false, true, true, ActionStripDV},
+		{"av1_hdr10_plain", true, true, false, false, false, false, false, true, true, ActionNone},
+		{"already_marked", true, true, false, false, false, false, true, false, true, ActionSkipMarked},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -48,6 +53,12 @@ func TestParseActionMatrix(t *testing.T) {
 			}
 			if info.DVHDR10Compatible() != c.compat {
 				t.Errorf("DVHDR10Compatible() = %v, want %v", info.DVHDR10Compatible(), c.compat)
+			}
+			if info.IsAV1() != c.av1 {
+				t.Errorf("IsAV1() = %v, want %v", info.IsAV1(), c.av1)
+			}
+			if info.StripSupported() != c.stripOk {
+				t.Errorf("StripSupported() = %v, want %v", info.StripSupported(), c.stripOk)
 			}
 			if info.Action() != c.action {
 				t.Errorf("Action() = %q, want %q", info.Action(), c.action)

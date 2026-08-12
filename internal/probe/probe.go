@@ -67,6 +67,9 @@ func (i Info) IsHDR10() bool {
 // IsDVP5 reports whether the stream carries Dolby Vision profile 5.
 func (i Info) IsDVP5() bool { return i.HasDV && i.DVProfile == 5 }
 
+// IsAV1 reports whether the video codec is AV1.
+func (i Info) IsAV1() bool { return i.Codec == "av1" }
+
 // DVHDR10Compatible reports whether the DV base layer is HDR10-compatible.
 // Compat IDs 1 and 6 (profiles 7.6, 8.1, ...) are safe to strip losslessly.
 func (i Info) DVHDR10Compatible() bool { return i.DVCompat == 1 || i.DVCompat == 6 }
@@ -101,6 +104,13 @@ func (i Info) Action() string {
 	default:
 		return ActionManual
 	}
+}
+
+// StripSupported reports whether the codec is supported for DV stripping.
+// Both HEVC and AV1 can carry Dolby Vision in an HDR10-compatible way
+// (profiles 7.6, 8.1 with compat 1/6).
+func (i Info) StripSupported() bool {
+	return i.Codec == "hevc" || i.Codec == "av1"
 }
 
 // Probe runs ffprobe on path and extracts HDR/DV metadata.
