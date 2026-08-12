@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 
 	"github.com/Belphemur/dvstrip/internal/convert"
@@ -24,6 +25,15 @@ func log(path string) zerolog.Logger {
 
 var stats struct {
 	scanned, skipped, marked, hdr10Only, stripped, failed atomic.Int64
+}
+
+// failures collects (path, reason) pairs for files that failed during
+// scan/watch, so the end-of-run summary can list them.
+var failures sync.Map // path string -> reason string
+
+func recordFailure(path, reason string) {
+	failures.Store(path, reason)
+	stats.failed.Add(1)
 }
 
 // resolveWorkers returns the configured worker count, or an auto-derived
@@ -116,7 +126,7 @@ func handle(ctx context.Context, job queue.Job) {
 	info, err := probe.Probe(ctx, job.Path)
 	if err != nil {
 		l.Error().Err(err).Msg("probe failed")
-		stats.failed.Add(1)
+		recordFailure(job.Path, "probe failed: "+err.Error())
 		return
 	}
 
@@ -155,6 +165,12 @@ func strip(ctx context.Context, info probe.Info, l zerolog.Logger) {
 		return
 	}
 
+	if !info.StripSupported() {
+		l.Warn().Str("codec", info.Codec).Msg("unsupported codec for DV stripping")
+		recordFailure(info.Path, "unsupported codec: "+info.Codec)
+		return
+	}
+
 	var out string
 	var err error
 	switch {
@@ -167,7 +183,7 @@ func strip(ctx context.Context, info probe.Info, l zerolog.Logger) {
 		l.Info().Int("profile", info.DVProfile).Msg("converting P5 -> P8.1 -> HDR10 (approximate colors, no re-encode)")
 		out, err = convert.P5(ctx, info, opts)
 	case info.DVHDR10Compatible():
-		l.Info().Int("profile", info.DVProfile).Int("compat", info.DVCompat).Msg("4K HDR10 + DV → stripping")
+		l.Info().Int("profile", info.DVProfile).Int("compat", info.DVCompat).Str("codec", info.Codec).Msg("4K HDR10 + DV → stripping")
 		out, err = convert.StripDV(ctx, info, opts)
 	default:
 		l.Warn().Int("profile", info.DVProfile).Int("compat", info.DVCompat).
@@ -177,7 +193,7 @@ func strip(ctx context.Context, info probe.Info, l zerolog.Logger) {
 	}
 	if err != nil {
 		l.Error().Err(err).Msg("conversion failed")
-		stats.failed.Add(1)
+		recordFailure(info.Path, "conversion failed: "+err.Error())
 		return
 	}
 
@@ -207,4 +223,16 @@ func printStats() {
 		Int64("stripped", stats.stripped.Load()).
 		Int64("failed", stats.failed.Load()).
 		Msg("summary")
+
+	if stats.failed.Load() == 0 {
+		return
+	}
+	pkg.Warn().Msg("failed files:")
+	failures.Range(func(key, value any) bool {
+		pkg.Warn().
+			Str("file", filepath.Base(key.(string))).
+			Str("reason", value.(string)).
+			Msg("  FAILED")
+		return true
+	})
 }

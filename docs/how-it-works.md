@@ -64,6 +64,8 @@ A fixed worker pool fed by a buffered channel (`workers * 8` capacity):
 
 ### Normal path: `StripDV` (DV compat 1/6 — profiles 7.6, 8.1)
 
+For **HEVC** streams:
+
 ```
 ffmpeg -hide_banner -loglevel error -nostats -y \
   -i <in> -map 0 -c copy \
@@ -74,7 +76,19 @@ ffmpeg -hide_banner -loglevel error -nostats -y \
   .swp.dvstrip.<in>
 ```
 
-`-c copy` means **stream copy**: no decoding, no re-encoding, bit-identical A/V/S. The only change is the removal of RPU/enhancement-layer NAL units by the `hevc_metadata` bitstream filter, plus the two container tags. The filter is pinned to `v:0` (the probed video stream) because `-map 0` also carries attached covers (mjpeg), which reject the HEVC-only filter.
+For **AV1** streams (requires ffmpeg ≥ 9.0):
+
+```
+ffmpeg -hide_banner -loglevel error -nostats -y \
+  -i <in> -map 0 -c copy \
+  -bsf:v:0 dovi_rpu=strip=1 \
+  -max_muxing_queue_size 2048 \
+  -metadata dvstrip=1 \
+  -metadata comment="dvstrip: dv -> hdr10 @ <RFC3339>" \
+  .swp.dvstrip.<in>
+```
+
+`-c copy` means **stream copy**: no decoding, no re-encoding, bit-identical A/V/S. The only change is the removal of RPU/enhancement-layer units (NAL units in HEVC, ITU-T T.35 OBUs in AV1), plus the two container tags. The bitstream filter is selected by codec (`hevc_metadata=remove_dovi=1` for HEVC, `dovi_rpu=strip=1` for AV1) and pinned to `v:0` (the probed video stream) because `-map 0` also carries attached covers (mjpeg), which reject the video-only filter.
 
 ### Profile 5 path: `ConvertP5`
 
@@ -149,6 +163,6 @@ A conversion never starts until the destination filesystem provably has room for
 | `cmd/scan.go` | recursive one-shot scan |
 | `cmd/watch.go` | fsnotify loop, debounce, `--full-scan` |
 | `internal/probe` | ffprobe wrapper (`Probe`) + pure parser/classifier (`Parse`, `Info.Action`) |
-| `internal/convert` | `StripDV`, `P5`, ffmpeg progress plumbing, tmp/verify/publish, `SpaceGuard` disk-space ledger |
+| `internal/convert` | `StripDV` (HEVC + AV1), `P5`, ffmpeg progress plumbing, tmp/verify/publish, `SpaceGuard` disk-space ledger |
 | `internal/display` | multi-bar progress (mpb): one line per in-flight conversion on a TTY; 10% milestone log lines on non-TTY |
 | `internal/queue` | worker pool, dedup, `AutoWorkers` |

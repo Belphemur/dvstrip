@@ -40,9 +40,27 @@ const (
 	flagNoStats  = "-nostats"
 )
 
-// bsfRemoveDovi is the bitstream filter spec that strips DV RPU/EL from the
-// HEVC stream (ffmpeg >= 7.1 / jellyfin-ffmpeg).
-const bsfRemoveDovi = "hevc_metadata=remove_dovi=1"
+// Bitstream filter specs that strip DV metadata from the video stream.
+// hevc_metadata=remove_dovi works on HEVC only (ffmpeg >= 7.1 /
+// jellyfin-ffmpeg); dovi_rpu=strip handles both HEVC and AV1 but requires
+// ffmpeg >= 9.0. The right filter is selected per-file based on codec.
+const (
+	bsfRemoveDoviHEVC = "hevc_metadata=remove_dovi=1"
+	bsfRemoveDoviAV1  = "dovi_rpu=strip=1"
+)
+
+// bsfForCodec returns the bitstream filter that strips Dolby Vision from
+// the given codec, or an error for unsupported codecs.
+func bsfForCodec(codec string) (string, error) {
+	switch codec {
+	case "hevc":
+		return bsfRemoveDoviHEVC, nil
+	case "av1":
+		return bsfRemoveDoviAV1, nil
+	default:
+		return "", fmt.Errorf("unsupported video codec for DV strip: %q", codec)
+	}
+}
 
 // Progress is the sink convert reports ffmpeg progress into. It is
 // implemented by display.Tracker; nil means "no progress UI".
@@ -235,14 +253,14 @@ func publish(ctx context.Context, src probe.Info, o Options) (string, error) {
 // stripArgs builds the StripDV ffmpeg command line. Pure and unit-tested:
 // the argument list is the contract with ffmpeg — the output path must come
 // last (muxer is guessed from its extension), and -bsf:v:0 pins the
-// HEVC-only bitstream filter to the probed video stream, because a bare
+// bitstream filter to the probed video stream, because a bare
 // -bsf:v would also hit attached mjpeg covers, which reject it.
-func stripArgs(in, tmp string) []string {
+func stripArgs(in, tmp, bsf string) []string {
 	args := []string{
 		"-hide_banner", "-loglevel", "error", flagNoStats, "-y",
 		"-i", in,
 		flagMap, "0", "-c", "copy",
-		"-bsf:v:0", bsfRemoveDovi,
+		"-bsf:v:0", bsf,
 		"-max_muxing_queue_size", "2048",
 	}
 	args = append(args, markerArgs("dv", "hdr10")...)
@@ -251,13 +269,20 @@ func stripArgs(in, tmp string) []string {
 
 // StripDV removes DV metadata (RPU/EL) from an HDR10-compatible DV stream
 // (compat 1/6: profiles 7.6, 8.1). Pure stream copy — no re-encode.
-// Requires ffmpeg >= 7.1 (hevc_metadata=remove_dovi) or jellyfin-ffmpeg.
+// The bitstream filter is chosen by codec: hevc_metadata=remove_dovi for
+// HEVC (ffmpeg >= 7.1 / jellyfin-ffmpeg), dovi_rpu=strip for AV1
+// (ffmpeg >= 9.0).
 //
 // The tmp file is cleaned up on every return path (deferred removal), so a
 // failed remux, a failed verification, a panic, or os.Exit all leave nothing
 // behind. After a successful publish the tmp has already been renamed away,
 // making the deferred removal a harmless no-op.
 func StripDV(ctx context.Context, src probe.Info, o Options) (string, error) {
+	bsf, err := bsfForCodec(src.Codec)
+	if err != nil {
+		return "", err
+	}
+
 	release, err := o.reserveOutput(ctx, src.Path)
 	if err != nil {
 		return "", err
@@ -267,7 +292,7 @@ func StripDV(ctx context.Context, src probe.Info, o Options) (string, error) {
 	tmp := tmpPath(src.Path)
 	defer func() { _ = os.Remove(tmp) }()
 
-	if err := runFFmpeg(ctx, src, o, tmp, stripArgs(src.Path, tmp)...); err != nil {
+	if err := runFFmpeg(ctx, src, o, tmp, stripArgs(src.Path, tmp, bsf)...); err != nil {
 		return "", err
 	}
 	return publish(ctx, src, o)
@@ -322,13 +347,17 @@ func P5(ctx context.Context, src probe.Info, o Options) (string, error) {
 	//    the original, DV metadata stripped, marker stamped.
 	tmp := tmpPath(src.Path)
 	defer func() { _ = os.Remove(tmp) }()
+	bsf, bsfErr := bsfForCodec(src.Codec)
+	if bsfErr != nil {
+		return "", bsfErr
+	}
 	args := []string{
 		"-hide_banner", "-loglevel", "error", flagNoStats, "-y",
 		"-i", p8, "-i", src.Path,
 		flagMap, "0:v", flagMap, "1", flagMap, "-1:v",
 		"-map_chapters", "1",
 		"-c", "copy",
-		"-bsf:v", bsfRemoveDovi,
+		"-bsf:v", bsf,
 		"-max_muxing_queue_size", "2048",
 	}
 	args = append(args, markerArgs("dv-p5", "hdr10")...)
