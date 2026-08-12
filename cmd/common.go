@@ -166,8 +166,8 @@ func strip(ctx context.Context, info probe.Info, l zerolog.Logger) {
 	}
 
 	if !info.StripSupported() {
-		l.Warn().Str("codec", info.Codec).Msg("unsupported codec for DV stripping")
-		recordFailure(info.Path, "unsupported codec: "+info.Codec)
+		l.Warn().Str("codec", info.Codec).Msg("unsupported codec for Dolby Vision processing")
+		recordFailure(info.Path, "unsupported codec for DV processing: "+info.Codec)
 		return
 	}
 
@@ -178,6 +178,13 @@ func strip(ctx context.Context, info probe.Info, l zerolog.Logger) {
 		if viper.GetString("p5-mode") == "skip" {
 			l.Info().Msg("skip: DV profile 5 (p5-mode=skip)")
 			stats.skipped.Add(1)
+			return
+		}
+		if info.IsAV1() {
+			// P5 conversion (dovi_tool reshape) is HEVC-only; AV1 P5
+			// doesn't exist in practice but guard defensively.
+			l.Warn().Str("codec", info.Codec).Msg("DV profile 5 in AV1 is not supported for conversion")
+			recordFailure(info.Path, "DV profile 5 in AV1 is not supported")
 			return
 		}
 		l.Info().Int("profile", info.DVProfile).Msg("converting P5 -> P8.1 -> HDR10 (approximate colors, no re-encode)")
@@ -232,7 +239,7 @@ func printStats() {
 		pkg.Warn().
 			Str("file", filepath.Base(key.(string))).
 			Str("reason", value.(string)).
-			Msg("  FAILED")
+			Msg("failed file")
 		return true
 	})
 }
