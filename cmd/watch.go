@@ -70,6 +70,9 @@ var watchCmd = &cobra.Command{
 			select {
 			case <-ctx.Done():
 				pkg.Info().Msg("shutting down, draining queue...")
+				// Flush files still waiting out their debounce before
+				// draining the queue, so scheduled work is never dropped.
+				scheduler.Close()
 				q.Wait()
 				printStats()
 				return nil
@@ -79,17 +82,28 @@ var watchCmd = &cobra.Command{
 				}
 				if ev.Op&fsnotify.Create != 0 {
 					if st, err := os.Stat(ev.Name); err == nil && st.IsDir() {
-						_ = watcher.Add(ev.Name) // pick up new subdirectories
+						// pick up new subdirectories
+						if err := watcher.Add(ev.Name); err != nil {
+							pkg.Error().Err(err).Str("dir", ev.Name).Msg("failed to watch new directory")
+						} else {
+							pkg.Info().Str("dir", ev.Name).Msg("new directory detected, now watching")
+						}
 						// The directory may already contain files (e.g. created
 						// and populated in one shot, or hard-linked in before the
-						// watcher was added). Submit everything inside it now.
-						_ = submitDir(q, ev.Name)
+						// watcher was added). Schedule everything inside it so
+						// files settle like any other event path.
+						scheduler.scheduleDir(ev.Name, func(err error) {
+							pkg.Error().Err(err).Str("dir", ev.Name).Msg("failed to scan new directory")
+						})
 						continue
 					}
 				}
-				if ev.Op&(fsnotify.Create|fsnotify.Write|fsnotify.Rename) == 0 || !isVideo(ev.Name) || isOwnOutput(ev.Name) {
+				// Rename-only events carry the old path, which no longer exists
+				// (the destination fires its own Create) — nothing to schedule.
+				if ev.Op&(fsnotify.Create|fsnotify.Write) == 0 || !isVideo(ev.Name) || isOwnOutput(ev.Name) {
 					continue
 				}
+				pkg.Debug().Str("file", filepath.Base(ev.Name)).Str("op", ev.Op.String()).Msg("event scheduled")
 				scheduler.schedule(ev.Name)
 			case err, ok := <-watcher.Errors:
 				if !ok {
