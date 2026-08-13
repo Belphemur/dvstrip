@@ -74,6 +74,8 @@ Every step is lossless stream copy — pixels are never decoded. Detail: [docs/h
 
 Install from source: `go install github.com/Belphemur/dvstrip@latest`
 
+Or grab a Linux executable (`linux/amd64` / `linux/arm64` tarball) from the [latest release](https://github.com/Belphemur/dvstrip/releases/latest).
+
 ## Flags
 
 | Flag | Default | Description |

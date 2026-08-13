@@ -29,7 +29,7 @@ docs/               user/developer documentation (mermaid diagrams)
 .github/workflows/  ci.yml (vet/test/lint/integration/goreleaser snapshot → single `gate` job for branch protection) + release.yml (tags → GHCR)
 renovate.json       Renovate: automerge every dependency PR once `gate` is green (needs the Mend app installed + repo allow_auto_merge)
 Dockerfile          alpine + jellyfin-ffmpeg + dovi-tool + hdr10plus-tool
-.goreleaser.yaml    dockers_v2 only (linux/amd64+arm64); NO archives/checksums (docker-only releases)
+.goreleaser.yaml    Linux binaries (amd64+arm64 tar.gz + checksums on the GitHub Release) + dockers_v2 (linux/amd64+arm64)
 ```
 
 ## Build, test, lint (must all pass before committing)
@@ -70,8 +70,8 @@ Note: the StripDV integration tests **skip** if the host ffmpeg lacks `remove_do
 
 ## Release process
 
-- Releases are tag-driven: `git tag vX.Y.Z && git push origin vX.Y.Z` → `release.yml` runs goreleaser → GitHub Release (changelog) + multi-arch GHCR images (`ghcr.io/belphemur/dvstrip:vX.Y.Z`, `:X.Y`, `:latest`).
-- **Docker-only artifacts.** Archives/checksums are deliberately disabled in `.goreleaser.yaml` (`formats: ["none"]`); do not re-enable without a user request.
+- Releases are tag-driven: `git tag vX.Y.Z && git push origin vX.Y.Z` → `release.yml` runs goreleaser → GitHub Release (changelog + Linux amd64/arm64 tarballs + checksums) + multi-arch GHCR images (`ghcr.io/belphemur/dvstrip:vX.Y.Z`, `:X.Y`, `:latest`).
+- **Artifacts: Linux executables + Docker images.** `.goreleaser.yaml` ships `tar.gz` archives with checksums (added per user request — previously docker-only) alongside the dockers_v2 images; keep both in sync when touching the file.
 - Every PR/push to main runs the full snapshot (including both docker platforms under QEMU) — a green PR means a green release.
 
 ## Environment gotchas

@@ -15,12 +15,13 @@ builds:
     goarch: [amd64, arm64]
     ldflags: [-s, -w]
 
-# No archives / checksums / brews: the only published artifacts are the
-# multi-arch docker images + manifest. "none" skips archiving entirely.
+# Linux executables are published on the GitHub Release alongside the
+# multi-arch docker images + manifest.
 archives:
-  - formats: ["none"]
+  - formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_v{{ .Version }}_{{ .Os }}_{{ .Arch }}"
 checksum:
-  disable: true
+  disable: false
 
 dockers_v2:
   - id: dvstrip
