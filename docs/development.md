@@ -56,6 +56,7 @@ git push origin main --tags
 The release workflow publishes:
 
 - GitHub Release with auto-generated changelog (`changelog: use: github` in `.goreleaser.yaml`)
+- Linux executables on the release: `dvstrip_vX.Y.Z_linux_{amd64,arm64}.tar.gz` (binary + README + LICENSE) plus a `checksums.txt`
 - `ghcr.io/belphemur/dvstrip:v0.1.0`, `:0.1`, `:latest` — multi-arch manifest (`linux/amd64` + `linux/arm64`)
 
 ## Local release dry-run

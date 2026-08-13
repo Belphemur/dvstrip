@@ -81,8 +81,10 @@ func sweepTemp(path string) {
 	}
 }
 
-// submitDir enqueues every video under dir (used by scan and watch --full-scan).
-func submitDir(q *queue.Queue, dir string) error {
+// walkVideos visits every processable video file under dir. In-flight tmp
+// files are swept instead of visited. Callers decide what to do with each
+// path (enqueue directly or schedule for settling).
+func walkVideos(dir string, visit func(path string)) error {
 	return filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -97,8 +99,15 @@ func submitDir(q *queue.Queue, dir string) error {
 		if !isVideo(path) || isOwnOutput(path) {
 			return nil
 		}
-		q.Submit(queue.Job{Path: path})
+		visit(path)
 		return nil
+	})
+}
+
+// submitDir enqueues every video under dir (used by scan and watch --full-scan).
+func submitDir(q *queue.Queue, dir string) error {
+	return walkVideos(dir, func(path string) {
+		q.Submit(queue.Job{Path: path})
 	})
 }
 

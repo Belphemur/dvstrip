@@ -4,8 +4,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sync"
-	"time"
 
 	"github.com/Belphemur/dvstrip/internal/convert"
 	"github.com/Belphemur/dvstrip/internal/queue"
@@ -64,28 +62,17 @@ var watchCmd = &cobra.Command{
 			}
 		}
 
-		// Debounce bursts of Write events while a file is being copied.
-		var mu sync.Mutex
-		timers := map[string]*time.Timer{}
-		delay := viper.GetDuration("debounce")
-		schedule := func(path string) {
-			mu.Lock()
-			defer mu.Unlock()
-			if t, ok := timers[path]; ok {
-				t.Stop()
-			}
-			timers[path] = time.AfterFunc(delay, func() {
-				mu.Lock()
-				delete(timers, path)
-				mu.Unlock()
-				q.Submit(queue.Job{Path: path})
-			})
-		}
+		// Debounce bursts of Write events while a file is being copied, and
+		// wait for the file size to settle before submitting.
+		scheduler := newFileScheduler(viper.GetDuration("debounce"), queueSubmit(q))
 
 		for {
 			select {
 			case <-ctx.Done():
 				pkg.Info().Msg("shutting down, draining queue...")
+				// Flush files still waiting out their debounce before
+				// draining the queue, so scheduled work is never dropped.
+				scheduler.Close()
 				q.Wait()
 				printStats()
 				return nil
@@ -95,14 +82,32 @@ var watchCmd = &cobra.Command{
 				}
 				if ev.Op&fsnotify.Create != 0 {
 					if st, err := os.Stat(ev.Name); err == nil && st.IsDir() {
-						_ = watcher.Add(ev.Name) // pick up new subdirectories
+						// pick up new subdirectories
+						if err := watcher.Add(ev.Name); err != nil {
+							// Without the watch, files inside would be
+							// processed once but never monitored — skip
+							// the scan to avoid that inconsistent state.
+							pkg.Error().Err(err).Str("dir", ev.Name).Msg("failed to watch new directory")
+							continue
+						}
+						pkg.Info().Str("dir", ev.Name).Msg("new directory detected, now watching")
+						// The directory may already contain files (e.g. created
+						// and populated in one shot, or hard-linked in before the
+						// watcher was added). Schedule everything inside it so
+						// files settle like any other event path.
+						scheduler.scheduleDir(ev.Name, func(err error) {
+							pkg.Error().Err(err).Str("dir", ev.Name).Msg("failed to scan new directory")
+						})
 						continue
 					}
 				}
+				// Rename-only events carry the old path, which no longer exists
+				// (the destination fires its own Create) — nothing to schedule.
 				if ev.Op&(fsnotify.Create|fsnotify.Write) == 0 || !isVideo(ev.Name) || isOwnOutput(ev.Name) {
 					continue
 				}
-				schedule(ev.Name)
+				pkg.Debug().Str("file", filepath.Base(ev.Name)).Str("op", ev.Op.String()).Msg("event scheduled")
+				scheduler.schedule(ev.Name)
 			case err, ok := <-watcher.Errors:
 				if !ok {
 					return nil

@@ -17,7 +17,9 @@ Guidance for AI agents (and humans) working in this repository.
 ```
 cmd/                cobra commands + shared orchestration (no subprocess logic here)
   root.go           flags ↔ viper binding, logger + progress-tracker setup, signal handling
-  common.go         handle(): probe → classify → strip; stats; filters
+  common.go         handle(): probe → classify → strip; stats; filters; walkVideos (shared dir-walk eligibility)
+  watch.go          fsnotify loop, new-directory pickup; scheduler.Close() flush before q.Wait() on shutdown
+  watch_scheduler.go fileScheduler: size-settling debounce, generation-guarded timers, Close() flush
 internal/
   probe/            ffprobe wrapper. Probe() = exec + Parse(); Parse() is pure and fixture-tested.
   convert/          ffmpeg/dovi_tool wrappers, progress plumbing, tmp→verify→publish
@@ -27,7 +29,7 @@ docs/               user/developer documentation (mermaid diagrams)
 .github/workflows/  ci.yml (vet/test/lint/integration/goreleaser snapshot → single `gate` job for branch protection) + release.yml (tags → GHCR)
 renovate.json       Renovate: automerge every dependency PR once `gate` is green (needs the Mend app installed + repo allow_auto_merge)
 Dockerfile          alpine + jellyfin-ffmpeg + dovi-tool + hdr10plus-tool
-.goreleaser.yaml    dockers_v2 only (linux/amd64+arm64); NO archives/checksums (docker-only releases)
+.goreleaser.yaml    Linux binaries (amd64+arm64 tar.gz + checksums on the GitHub Release) + dockers_v2 (linux/amd64+arm64)
 ```
 
 ## Build, test, lint (must all pass before committing)
@@ -68,13 +70,14 @@ Note: the StripDV integration tests **skip** if the host ffmpeg lacks `remove_do
 
 ## Release process
 
-- Releases are tag-driven: `git tag vX.Y.Z && git push origin vX.Y.Z` → `release.yml` runs goreleaser → GitHub Release (changelog) + multi-arch GHCR images (`ghcr.io/belphemur/dvstrip:vX.Y.Z`, `:X.Y`, `:latest`).
-- **Docker-only artifacts.** Archives/checksums are deliberately disabled in `.goreleaser.yaml` (`formats: ["none"]`); do not re-enable without a user request.
+- Releases are tag-driven: `git tag vX.Y.Z && git push origin vX.Y.Z` → `release.yml` runs goreleaser → GitHub Release (changelog + Linux amd64/arm64 tarballs + checksums) + multi-arch GHCR images (`ghcr.io/belphemur/dvstrip:vX.Y.Z`, `:X.Y`, `:latest`).
+- **Artifacts: Linux executables + Docker images.** `.goreleaser.yaml` ships `tar.gz` archives with checksums (added per user request — previously docker-only) alongside the dockers_v2 images; keep both in sync when touching the file.
 - Every PR/push to main runs the full snapshot (including both docker platforms under QEMU) — a green PR means a green release.
 
 ## Environment gotchas
 
 - Host ffmpeg may be < 7.1 (no `remove_dovi`); the Docker image is the reference environment. On Arch/CachyOS: `sudo pacman -S jellyfin-ffmpeg` then symlink `/usr/lib/jellyfin-ffmpeg/{ffmpeg,ffprobe}` into `/usr/local/bin` (same as the Dockerfile) so the bare `ffmpeg` name resolves to the jellyfin build.
 - fsnotify is not recursive — watch mode adds subdirs explicitly; inotify does not work on NFS/SMB mounts.
+- Watch-mode events never reach the queue directly: `fileScheduler` holds each path until its size is stable for the debounce window. Callbacks are generation-guarded (a stopped-but-fired `AfterFunc` is ignored), removed files are dropped without submitting, transient `Stat` errors retry, and `scheduler.Close()` flushes pending files before `q.Wait()` on shutdown.
 - Worker pool workers never exit (documented simplification); `Queue.Wait()` is the drain mechanism.
 - `Options.Progress` must be left nil when no tracker exists — assigning a typed nil `*display.Tracker` to the interface breaks the `== nil` check (see `convertOptions`).
