@@ -64,18 +64,51 @@ var watchCmd = &cobra.Command{
 			}
 		}
 
-		// Debounce bursts of Write events while a file is being copied.
+		// Debounce bursts of Write events while a file is being copied, and
+		// wait for the file size to settle before submitting. This matters for
+		// hard-linked files: the Create event may arrive while the shared inode
+		// is still growing in another directory, so probing immediately would
+		// see an incomplete file. We reschedule until the size stops changing
+		// for the configured debounce interval.
+		type pending struct {
+			timer *time.Timer
+			size  int64
+		}
 		var mu sync.Mutex
-		timers := map[string]*time.Timer{}
+		timers := map[string]*pending{}
 		delay := viper.GetDuration("debounce")
 		schedule := func(path string) {
 			mu.Lock()
 			defer mu.Unlock()
-			if t, ok := timers[path]; ok {
-				t.Stop()
+
+			curSize := int64(-1)
+			if st, err := os.Stat(path); err == nil {
+				curSize = st.Size()
 			}
-			timers[path] = time.AfterFunc(delay, func() {
+
+			p, ok := timers[path]
+			if ok {
+				p.timer.Stop()
+				p.size = curSize
+			} else {
+				p = &pending{size: curSize}
+				timers[path] = p
+			}
+
+			p.timer = time.AfterFunc(delay, func() {
 				mu.Lock()
+				nowSize := int64(-1)
+				if st, err := os.Stat(path); err == nil {
+					nowSize = st.Size()
+				}
+				if nowSize != p.size {
+					// Still growing (or disappeared and reappeared). Reset the
+					// timer with the new baseline instead of submitting.
+					p.size = nowSize
+					p.timer.Reset(delay)
+					mu.Unlock()
+					return
+				}
 				delete(timers, path)
 				mu.Unlock()
 				q.Submit(queue.Job{Path: path})
@@ -96,10 +129,14 @@ var watchCmd = &cobra.Command{
 				if ev.Op&fsnotify.Create != 0 {
 					if st, err := os.Stat(ev.Name); err == nil && st.IsDir() {
 						_ = watcher.Add(ev.Name) // pick up new subdirectories
+						// The directory may already contain files (e.g. created
+						// and populated in one shot, or hard-linked in before the
+						// watcher was added). Submit everything inside it now.
+						_ = submitDir(q, ev.Name)
 						continue
 					}
 				}
-				if ev.Op&(fsnotify.Create|fsnotify.Write) == 0 || !isVideo(ev.Name) || isOwnOutput(ev.Name) {
+				if ev.Op&(fsnotify.Create|fsnotify.Write|fsnotify.Rename) == 0 || !isVideo(ev.Name) || isOwnOutput(ev.Name) {
 					continue
 				}
 				schedule(ev.Name)
