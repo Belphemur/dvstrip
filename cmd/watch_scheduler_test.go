@@ -102,7 +102,18 @@ func TestFileSchedulerConcurrentEvents(t *testing.T) {
 	for range 50 {
 		go s.schedule(path)
 	}
-	wg.Wait()
+
+	done := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("scheduler did not submit within timeout")
+	}
 
 	if calls.Load() != 1 {
 		t.Fatalf("submissions = %d, want 1", calls.Load())

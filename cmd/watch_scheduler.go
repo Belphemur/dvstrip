@@ -77,7 +77,9 @@ func (s *fileScheduler) checkAndSubmit(path string) {
 	}
 	if nowSize != p.size {
 		p.size = nowSize
-		p.timer.Reset(s.delay)
+		p.timer = time.AfterFunc(s.delay, func() {
+			s.checkAndSubmit(path)
+		})
 		s.mu.Unlock()
 		return
 	}
