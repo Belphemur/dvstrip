@@ -4,8 +4,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"sync"
-	"time"
 
 	"github.com/Belphemur/dvstrip/internal/convert"
 	"github.com/Belphemur/dvstrip/internal/queue"
@@ -65,55 +63,8 @@ var watchCmd = &cobra.Command{
 		}
 
 		// Debounce bursts of Write events while a file is being copied, and
-		// wait for the file size to settle before submitting. This matters for
-		// hard-linked files: the Create event may arrive while the shared inode
-		// is still growing in another directory, so probing immediately would
-		// see an incomplete file. We reschedule until the size stops changing
-		// for the configured debounce interval.
-		type pending struct {
-			timer *time.Timer
-			size  int64
-		}
-		var mu sync.Mutex
-		timers := map[string]*pending{}
-		delay := viper.GetDuration("debounce")
-		schedule := func(path string) {
-			mu.Lock()
-			defer mu.Unlock()
-
-			curSize := int64(-1)
-			if st, err := os.Stat(path); err == nil {
-				curSize = st.Size()
-			}
-
-			p, ok := timers[path]
-			if ok {
-				p.timer.Stop()
-				p.size = curSize
-			} else {
-				p = &pending{size: curSize}
-				timers[path] = p
-			}
-
-			p.timer = time.AfterFunc(delay, func() {
-				mu.Lock()
-				nowSize := int64(-1)
-				if st, err := os.Stat(path); err == nil {
-					nowSize = st.Size()
-				}
-				if nowSize != p.size {
-					// Still growing (or disappeared and reappeared). Reset the
-					// timer with the new baseline instead of submitting.
-					p.size = nowSize
-					p.timer.Reset(delay)
-					mu.Unlock()
-					return
-				}
-				delete(timers, path)
-				mu.Unlock()
-				q.Submit(queue.Job{Path: path})
-			})
-		}
+		// wait for the file size to settle before submitting.
+		scheduler := newFileScheduler(viper.GetDuration("debounce"), queueSubmit(q))
 
 		for {
 			select {
@@ -139,7 +90,7 @@ var watchCmd = &cobra.Command{
 				if ev.Op&(fsnotify.Create|fsnotify.Write|fsnotify.Rename) == 0 || !isVideo(ev.Name) || isOwnOutput(ev.Name) {
 					continue
 				}
-				schedule(ev.Name)
+				scheduler.schedule(ev.Name)
 			case err, ok := <-watcher.Errors:
 				if !ok {
 					return nil
