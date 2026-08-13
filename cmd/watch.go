@@ -84,10 +84,13 @@ var watchCmd = &cobra.Command{
 					if st, err := os.Stat(ev.Name); err == nil && st.IsDir() {
 						// pick up new subdirectories
 						if err := watcher.Add(ev.Name); err != nil {
+							// Without the watch, files inside would be
+							// processed once but never monitored — skip
+							// the scan to avoid that inconsistent state.
 							pkg.Error().Err(err).Str("dir", ev.Name).Msg("failed to watch new directory")
-						} else {
-							pkg.Info().Str("dir", ev.Name).Msg("new directory detected, now watching")
+							continue
 						}
+						pkg.Info().Str("dir", ev.Name).Msg("new directory detected, now watching")
 						// The directory may already contain files (e.g. created
 						// and populated in one shot, or hard-linked in before the
 						// watcher was added). Schedule everything inside it so
