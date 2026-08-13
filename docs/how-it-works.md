@@ -130,10 +130,11 @@ Every produced file carries two container-level tags written in the same remux p
 
 ## 5. Watch mode
 
-- fsnotify is **not** recursive: at startup every existing subdirectory is added, and newly created directories are added on their `Create` event.
+- fsnotify is **not** recursive: at startup every existing subdirectory is added, and newly created directories are added on their `Create` event (logged at info level). The new directory's current contents are walked immediately with the same eligibility rules as `submitDir`, but each file is routed through the **scheduler** so it too must settle before processing.
 - `--full-scan` enqueues the whole tree once before going live. Queue dedup makes any overlap with watcher events harmless.
-- Copying a file in produces a burst of `Write` events; each path gets a `time.AfterFunc` timer that is reset on every event (**debounce**, default 5s). Only when a file has been quiet for the debounce window is it submitted.
-- SIGINT/SIGTERM (wired through cobra's command context via `signal.NotifyContext`) stops the loop, drains the queue with `Wait()`, prints the summary counters, exits 0.
+- **Size-settling debounce** (`cmd/watch_scheduler.go`): every `Create`/`Write` event on a video file (re)arms a `time.AfterFunc` timer (default 5s) recording the file's current size. When the timer fires, the size is re-checked: changed → re-arm; gone (`os.IsNotExist`, e.g. renamed away) → dropped silently; transient `Stat` error → retried, never mistaken for a stable size; unchanged → submitted. Timer callbacks carry a generation counter so an already-fired callback from a replaced timer (`Timer.Stop` cannot withdraw it) is ignored — no early or double submissions.
+- `Rename`-only events are ignored: they carry the old path, which no longer exists — the destination fires its own `Create`.
+- SIGINT/SIGTERM (wired through cobra's command context via `signal.NotifyContext`) stops the loop, **flushes the scheduler** (`Close` submits every pending file immediately rather than dropping it), drains the queue with `Wait()`, prints the summary counters, exits 0.
 
 ## 6. Logging, stats & progress bars
 
@@ -158,10 +159,11 @@ A conversion never starts until the destination filesystem provably has room for
 | Path | Responsibility |
 |---|---|
 | `cmd/root.go` | cobra root, viper binding, logger + tracker setup, signal context, PATH checks |
-| `cmd/common.go` | `handle` (probe → classify → strip), `submitDir`, filters, stats |
+| `cmd/common.go` | `handle` (probe → classify → strip), `walkVideos`/`submitDir`, filters, stats |
 | `cmd/check.go` | single-file structured report |
 | `cmd/scan.go` | recursive one-shot scan |
-| `cmd/watch.go` | fsnotify loop, debounce, `--full-scan` |
+| `cmd/watch.go` | fsnotify loop, new-directory pickup, `--full-scan` |
+| `cmd/watch_scheduler.go` | `fileScheduler`: size-settling debounce with generation-guarded timers and `Close` flush |
 | `internal/probe` | ffprobe wrapper (`Probe`) + pure parser/classifier (`Parse`, `Info.Action`) |
 | `internal/convert` | `StripDV` (HEVC + AV1), `P5`, ffmpeg progress plumbing, tmp/verify/publish, `SpaceGuard` disk-space ledger |
 | `internal/display` | multi-bar progress (mpb): one line per in-flight conversion on a TTY; 10% milestone log lines on non-TTY |

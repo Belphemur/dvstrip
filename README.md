@@ -85,7 +85,7 @@ Install from source: `go install github.com/Belphemur/dvstrip@latest`
 | `--suffix` | `.hdr10` | Output suffix before the extension (ignored with `--replace`) |
 | `--p5-mode` | `convert` | DV profile 5 handling: `convert` \| `skip` |
 | `--hdr10plus` | `false` | Preserve HDR10+ when present, fall back to HDR10 otherwise |
-| `--debounce` | `5s` | Watch mode: settle time per changed file |
+| `--debounce` | `5s` | Watch mode: how long a file's size must stay stable before it's processed |
 | `--full-scan` | `false` | Watch mode: scan the whole tree once at startup |
 | `--no-progress` | `false` | Disable per-file progress bars (on by default; forced off with `--log-json`) |
 | `--log-level` | `info` | `trace` \| `debug` \| `info` \| `warn` \| `error` |

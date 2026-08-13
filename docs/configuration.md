@@ -32,7 +32,7 @@ DVSTRIP_WORKERS=4 DVSTRIP_REPLACE=true dvstrip scan /media
 | `suffix` | `--suffix` | `DVSTRIP_SUFFIX` | `.hdr10` | Suffix inserted before the extension of output files. Ignored with `replace`. |
 | `p5-mode` | `--p5-mode` | `DVSTRIP_P5_MODE` | `convert` | DV profile 5 handling: `convert` (dovi_tool reshape + strip) or `skip`. |
 | `hdr10plus` | `--hdr10plus` | `DVSTRIP_HDR10PLUS` | `false` | Preserve HDR10+ when present (it survives stream copy regardless); log explicit fallback to HDR10 when absent. |
-| `debounce` | `--debounce` | `DVSTRIP_DEBOUNCE` | `5s` | Watch mode: how long a file must be quiet before it's processed. |
+| `debounce` | `--debounce` | `DVSTRIP_DEBOUNCE` | `5s` | Watch mode: how long a file's size must stay stable before it's processed. |
 | `full-scan` | `--full-scan` | `DVSTRIP_FULL_SCAN` | `false` | Watch mode only: enqueue the whole tree once at startup. |
 | `no-progress` | `--no-progress` | `DVSTRIP_NO_PROGRESS` | `false` | Disable per-file progress bars. Bars are **on by default**; they're forced off in `--log-json` mode so JSON stays machine-parseable. |
 | `log-level` | `--log-level` | `DVSTRIP_LOG_LEVEL` | `info` | `trace` \| `debug` \| `info` \| `warn` \| `error`. |

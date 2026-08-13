@@ -17,7 +17,9 @@ Guidance for AI agents (and humans) working in this repository.
 ```
 cmd/                cobra commands + shared orchestration (no subprocess logic here)
   root.go           flags ↔ viper binding, logger + progress-tracker setup, signal handling
-  common.go         handle(): probe → classify → strip; stats; filters
+  common.go         handle(): probe → classify → strip; stats; filters; walkVideos (shared dir-walk eligibility)
+  watch.go          fsnotify loop, new-directory pickup; scheduler.Close() flush before q.Wait() on shutdown
+  watch_scheduler.go fileScheduler: size-settling debounce, generation-guarded timers, Close() flush
 internal/
   probe/            ffprobe wrapper. Probe() = exec + Parse(); Parse() is pure and fixture-tested.
   convert/          ffmpeg/dovi_tool wrappers, progress plumbing, tmp→verify→publish
@@ -76,5 +78,6 @@ Note: the StripDV integration tests **skip** if the host ffmpeg lacks `remove_do
 
 - Host ffmpeg may be < 7.1 (no `remove_dovi`); the Docker image is the reference environment. On Arch/CachyOS: `sudo pacman -S jellyfin-ffmpeg` then symlink `/usr/lib/jellyfin-ffmpeg/{ffmpeg,ffprobe}` into `/usr/local/bin` (same as the Dockerfile) so the bare `ffmpeg` name resolves to the jellyfin build.
 - fsnotify is not recursive — watch mode adds subdirs explicitly; inotify does not work on NFS/SMB mounts.
+- Watch-mode events never reach the queue directly: `fileScheduler` holds each path until its size is stable for the debounce window. Callbacks are generation-guarded (a stopped-but-fired `AfterFunc` is ignored), removed files are dropped without submitting, transient `Stat` errors retry, and `scheduler.Close()` flushes pending files before `q.Wait()` on shutdown.
 - Worker pool workers never exit (documented simplification); `Queue.Wait()` is the drain mechanism.
 - `Options.Progress` must be left nil when no tracker exists — assigning a typed nil `*display.Tracker` to the interface breaks the `== nil` check (see `convertOptions`).
