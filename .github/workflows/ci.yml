@@ -19,8 +19,8 @@ jobs:
 
   integration:
     # Build-tagged end-to-end tests against the real toolchain. The portable
-    # jellyfin-ffmpeg tarball provides hevc_metadata=remove_dovi, which stock
-    # ubuntu ffmpeg lacks.
+    # jellyfin-ffmpeg tarball provides the dovi_rpu=strip bitstream filter,
+    # which stock ubuntu ffmpeg often lacks.
     runs-on: ubuntu-latest
     env:
       JELLYFIN_FFMPEG: 7.1.4-3 # pinned for reproducibility; bump deliberately
@@ -36,10 +36,10 @@ jobs:
           mkdir -p "$HOME/jellyfin-ffmpeg"
           tar -xJf /tmp/jff.tar.xz -C "$HOME/jellyfin-ffmpeg"
           echo "$HOME/jellyfin-ffmpeg" >> "$GITHUB_PATH"
-      - name: Verify toolchain supports remove_dovi
+      - name: Verify toolchain supports dovi_rpu
         run: |
           ffmpeg -version | head -1
-          ffmpeg -hide_banner -h bsf=hevc_metadata | grep -q remove_dovi
+          ffmpeg -hide_banner -h bsf=dovi_rpu | grep -q strip
       - run: go test -tags integration ./internal/convert/ -v -race -count=1
 
   lint:

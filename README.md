@@ -67,7 +67,7 @@ Every step is lossless stream copy — pixels are never decoded. Detail: [docs/h
 
 | Tool | Why |
 |---|---|
-| ffmpeg ≥ 7.1 (or jellyfin-ffmpeg) | `hevc_metadata=remove_dovi` bitstream filter — check with `ffmpeg -h bsf=hevc_metadata` |
+| ffmpeg ≥ 9.0 (or a recent jellyfin-ffmpeg) | `dovi_rpu=strip=1` bitstream filter — check with `ffmpeg -h bsf=dovi_rpu` |
 | ffprobe | Metadata detection |
 | dovi_tool | DV profile 5 conversion only |
 | hdr10plus_tool | Optional |

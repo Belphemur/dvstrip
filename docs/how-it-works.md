@@ -16,7 +16,7 @@ flowchart TD
     C -->|"not HDR10 and not P5"| S3["skip"]
     C -->|"no Dolby Vision"| S4["already plain HDR10"]
     C -->|"DV profile 5"| P5["convert.ConvertP5<br/>dovi_tool -m 2 → P8.1 → strip"]
-    C -->|"DV compat 1 or 6"| SD["convert.StripDV<br/>hevc_metadata=remove_dovi=1"]
+    C -->|"DV compat 1 or 6"| SD["convert.StripDV<br/>dovi_rpu=strip=1"]
     C -->|"other DV"| W["warn: manual handling"]
     P5 --> V["verify tmp<br/>probe: parses, width unchanged,<br/>DV gone, marker present"]
     SD --> V
@@ -64,19 +64,7 @@ A fixed worker pool fed by a buffered channel (`workers * 8` capacity):
 
 ### Normal path: `StripDV` (DV compat 1/6 — profiles 7.6, 8.1)
 
-For **HEVC** streams:
-
-```
-ffmpeg -hide_banner -loglevel error -nostats -y \
-  -i <in> -map 0 -c copy \
-  -bsf:v:0 hevc_metadata=remove_dovi=1 \
-  -max_muxing_queue_size 2048 \
-  -metadata dvstrip=1 \
-  -metadata comment="dvstrip: dv -> hdr10 @ <RFC3339>" \
-  .swp.dvstrip.<in>
-```
-
-For **AV1** streams (requires ffmpeg ≥ 9.0):
+The strip path uses a single bitstream filter for both HEVC and AV1 streams, avoiding the old codec-specific `hevc_metadata=remove_dovi` split:
 
 ```
 ffmpeg -hide_banner -loglevel error -nostats -y \
@@ -88,15 +76,17 @@ ffmpeg -hide_banner -loglevel error -nostats -y \
   .swp.dvstrip.<in>
 ```
 
-`-c copy` means **stream copy**: no decoding, no re-encoding, bit-identical A/V/S. The only change is the removal of RPU/enhancement-layer units (NAL units in HEVC, ITU-T T.35 OBUs in AV1), plus the two container tags. The bitstream filter is selected by codec (`hevc_metadata=remove_dovi=1` for HEVC, `dovi_rpu=strip=1` for AV1) and pinned to `v:0` (the probed video stream) because `-map 0` also carries attached covers (mjpeg), which reject the video-only filter.
+`-c copy` means **stream copy**: no decoding, no re-encoding, bit-identical A/V/S. The only change is the removal of DV RPU / enhancement-layer metadata (HEVC NAL units or AV1 T.35 OBUs), plus the two container tags. The filter is pinned to `v:0` (the probed video stream) because `-map 0` also carries attached covers (mjpeg), which reject the video-only filter.
 
 ### Profile 5 path: `ConvertP5`
 
 DV profile 5 has no HDR10-compatible base layer (it uses IPTPQc2 colors), so a bare strip would produce broken colors. The pipeline instead reshapes the DV metadata first — still no pixel re-encoding:
 
-1. `ffmpeg -i <in> -map 0:v:0 -c:v copy -bsf:v hevc_mp4toannexb -f hevc <tmp>/bl.hevc` — extract the raw HEVC video.
-2. `dovi_tool -m 2 convert --discard bl.hevc -o p8.hevc` — convert the RPU mapping from profile 5 to 8.1 and discard the enhancement layer.
-3. Remux: `-i p8.hevc -i <in> -map 0:v -map 1 -map -1:v -map_chapters 1 -c copy -bsf:v hevc_metadata=remove_dovi=1` — video from the converted stream, everything else (audio, subs, chapters) from the original, DV metadata stripped, marker stamped.
+1. `ffmpeg -i <in> -map 0:v:0 -c:v copy -bsf:v hevc_mp4toannexb -f matroska <tmp>/bl.mkv` — extract the base layer into an MKV container so timestamps survive the later remux.
+2. `dovi_tool -m 2 convert --discard bl.mkv -o p8.mkv` — convert the RPU mapping from profile 5 to 8.1 and discard the enhancement layer.
+3. Remux: `-i p8.mkv -i <in> -map 0:v -map 1 -map -1:v -map_chapters 1 -c copy -bsf:v:0 dovi_rpu=strip=1` — video from the converted stream, everything else (audio, subs, chapters) from the original, DV metadata stripped, marker stamped.
+
+The MKV intermediate keeps container timestamps intact; a raw HEVC elementary stream carries no timestamps, which causes the later remux to fail with `Can't write packet with unknown timestamp`.
 
 See [hdr-metadata.md](hdr-metadata.md) for why this is done and the color-accuracy caveat.
 

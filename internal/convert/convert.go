@@ -40,27 +40,12 @@ const (
 	flagNoStats  = "-nostats"
 )
 
-// Bitstream filter specs that strip DV metadata from the video stream.
-// hevc_metadata=remove_dovi works on HEVC only (ffmpeg >= 7.1 /
-// jellyfin-ffmpeg); dovi_rpu=strip handles both HEVC and AV1 but requires
-// ffmpeg >= 9.0. The right filter is selected per-file based on codec.
-const (
-	bsfRemoveDoviHEVC = "hevc_metadata=remove_dovi=1"
-	bsfRemoveDoviAV1  = "dovi_rpu=strip=1"
-)
-
-// bsfForCodec returns the bitstream filter that strips Dolby Vision from
-// the given codec, or an error for unsupported codecs.
-func bsfForCodec(codec string) (string, error) {
-	switch codec {
-	case "hevc":
-		return bsfRemoveDoviHEVC, nil
-	case "av1":
-		return bsfRemoveDoviAV1, nil
-	default:
-		return "", fmt.Errorf("unsupported video codec for DV strip: %q", codec)
-	}
-}
+// doviRpuStrip strips Dolby Vision metadata from HEVC and AV1 streams.
+// This single bsf replaces the old per-codec constants
+// (hevc_metadata=remove_dovi for HEVC, dovi_rpu=strip for AV1) because
+// jellyfin-ffmpeg 8.x lacks the remove_dovi option entirely, and dovi_rpu
+// works on both codecs in ffmpeg >= 9.0 or jellyfin-ffmpeg.
+const doviRpuStrip = "dovi_rpu=strip=1"
 
 // Progress is the sink convert reports ffmpeg progress into. It is
 // implemented by display.Tracker; nil means "no progress UI".
@@ -142,15 +127,19 @@ func barLabel(src probe.Info) string {
 }
 
 // runFFmpeg runs ffmpeg with -nostats and, when a Progress sink is set,
-// streams machine-readable -progress output into a per-file bar keyed by the
-// source path. ffmpeg stderr is captured and attached to any returned error
+// streams machine-readable -progress output into a per-file bar keyed by
+// progressKey. ffmpeg stderr is captured and attached to any returned error
 // instead of being dumped raw onto the terminal. out is the file ffmpeg
 // writes; only bytes landing in the reserved destination directory shrink the
 // job's space reservation (e.g. the P5 extraction writes under os.MkdirTemp
 // and must leave the reservation untouched).
-func runFFmpeg(ctx context.Context, src probe.Info, o Options, out string, args ...string) error {
+func runFFmpeg(ctx context.Context, src probe.Info, o Options, out, progressKey string, args ...string) error {
 	if o.Progress == nil {
 		return run(ctx, "ffmpeg", args...)
+	}
+
+	if progressKey == "" {
+		progressKey = src.Path
 	}
 
 	full := append([]string{flagNoStats, "-progress", "pipe:1"}, args...)
@@ -167,8 +156,8 @@ func runFFmpeg(ctx context.Context, src probe.Info, o Options, out string, args 
 	if st, statErr := os.Stat(src.Path); statErr == nil {
 		total = st.Size()
 	}
-	o.Progress.Start(src.Path, barLabel(src), total)
-	defer o.Progress.Finish(src.Path)
+	o.Progress.Start(progressKey, barLabel(src), total)
+	defer o.Progress.Finish(progressKey)
 
 	if err := cmd.Start(); err != nil {
 		return fmt.Errorf("start ffmpeg: %w", err)
@@ -184,7 +173,7 @@ func runFFmpeg(ctx context.Context, src probe.Info, o Options, out string, args 
 			// stays accurate for jobs still waiting to start.
 			o.accountWritten(out, n-written)
 			written = n
-			o.Progress.Set(src.Path, n)
+			o.Progress.Set(progressKey, n)
 		}
 	}
 	if err := cmd.Wait(); err != nil {
@@ -251,16 +240,15 @@ func publish(ctx context.Context, src probe.Info, o Options) (string, error) {
 }
 
 // stripArgs builds the StripDV ffmpeg command line. Pure and unit-tested:
-// the argument list is the contract with ffmpeg — the output path must come
-// last (muxer is guessed from its extension), and -bsf:v:0 pins the
-// bitstream filter to the probed video stream, because a bare
+// the output path must come last (muxer is guessed from its extension), and
+// -bsf:v:0 pins the bitstream filter to the probed video stream because a bare
 // -bsf:v would also hit attached mjpeg covers, which reject it.
-func stripArgs(in, tmp, bsf string) []string {
+func stripArgs(in, tmp string) []string {
 	args := []string{
 		"-hide_banner", "-loglevel", "error", flagNoStats, "-y",
 		"-i", in,
 		flagMap, "0", "-c", "copy",
-		"-bsf:v:0", bsf,
+		"-bsf:v:0", doviRpuStrip,
 		"-max_muxing_queue_size", "2048",
 	}
 	args = append(args, markerArgs("dv", "hdr10")...)
@@ -269,20 +257,14 @@ func stripArgs(in, tmp, bsf string) []string {
 
 // StripDV removes DV metadata (RPU/EL) from an HDR10-compatible DV stream
 // (compat 1/6: profiles 7.6, 8.1). Pure stream copy — no re-encode.
-// The bitstream filter is chosen by codec: hevc_metadata=remove_dovi for
-// HEVC (ffmpeg >= 7.1 / jellyfin-ffmpeg), dovi_rpu=strip for AV1
-// (ffmpeg >= 9.0).
+// Uses dovi_rpu=strip=1 which works on both HEVC and AV1 (ffmpeg >= 9.0 or
+// jellyfin-ffmpeg).
 //
 // The tmp file is cleaned up on every return path (deferred removal), so a
 // failed remux, a failed verification, a panic, or os.Exit all leave nothing
 // behind. After a successful publish the tmp has already been renamed away,
 // making the deferred removal a harmless no-op.
 func StripDV(ctx context.Context, src probe.Info, o Options) (string, error) {
-	bsf, err := bsfForCodec(src.Codec)
-	if err != nil {
-		return "", err
-	}
-
 	release, err := o.reserveOutput(ctx, src.Path)
 	if err != nil {
 		return "", err
@@ -292,15 +274,16 @@ func StripDV(ctx context.Context, src probe.Info, o Options) (string, error) {
 	tmp := tmpPath(src.Path)
 	defer func() { _ = os.Remove(tmp) }()
 
-	if err := runFFmpeg(ctx, src, o, tmp, stripArgs(src.Path, tmp, bsf)...); err != nil {
+	if err := runFFmpeg(ctx, src, o, tmp, src.Path, stripArgs(src.Path, tmp)...); err != nil {
 		return "", err
 	}
 	return publish(ctx, src, o)
 }
 
-// P5 handles DV profile 5: extract raw HEVC, reshape the RPU from
-// profile 5 to 8.1 and discard the enhancement layer with dovi_tool, then
-// remux and strip DV metadata to land on HDR10. No pixel re-encoding happens.
+// P5 handles DV profile 5: extract the base layer into an MKV container
+// (preserving original timestamps), reshape the RPU from profile 5 to 8.1 and
+// discard the enhancement layer with dovi_tool, then remux and strip DV
+// metadata to land on HDR10. No pixel re-encoding happens.
 //
 // CAVEAT: a P5 base layer is not true HDR10 (IPTPQc2). The result renders
 // correctly on DV-aware players via the reshaped RPU path, but as plain
@@ -325,44 +308,47 @@ func P5(ctx context.Context, src probe.Info, o Options) (string, error) {
 		return "", fmt.Errorf("temp dir: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
-	bl := filepath.Join(dir, "bl.hevc")
-	p8 := filepath.Join(dir, "p8.hevc")
+	blMkv := filepath.Join(dir, "bl.mkv") // base layer with timestamps preserved
+	p8Mkv := filepath.Join(dir, "p8.mkv") // dovi_tool output with timestamps
 
-	// 1) extract raw annex-b HEVC video (writes to the os.MkdirTemp dir, not
-	//    the reserved destination, so these bytes must not shrink the guard).
-	if err := runFFmpeg(ctx, src, o, bl,
+	// 1) extract base layer into an MKV container so timestamps survive.
+	//    A raw HEVC elementary stream (contrast: StripDV's -f hevc) carries
+	//    no container timestamps, which breaks the later remux with
+	//    "Can't write packet with unknown timestamp".
+	if err := runFFmpeg(ctx, src, o, blMkv, src.Path,
 		"-hide_banner", "-loglevel", "error", flagNoStats, "-y",
 		"-i", src.Path, flagMap, "0:v:0", "-c:v", "copy",
-		"-bsf:v", "hevc_mp4toannexb", "-f", "hevc", bl); err != nil {
+		"-bsf:v", "hevc_mp4toannexb", blMkv); err != nil {
 		return "", fmt.Errorf("extract hevc: %w", err)
 	}
 
 	// 2) reshape RPU: profile 5 -> 8.1, drop the enhancement layer.
+	//    dovi_tool reads the MKV container and writes an MKV back, keeping
+	//    valid timestamps that the raw-HEVC path would lose.
 	if err := runSpinner(ctx, src, o,
-		"dovi_tool", "-m", "2", "convert", "--discard", bl, "-o", p8); err != nil {
+		"dovi_tool", "-m", "2", "convert", "--discard", blMkv, "-o", p8Mkv); err != nil {
 		return "", fmt.Errorf("dovi_tool convert: %w", err)
 	}
 
 	// 3) remux: video from the converted stream, audio/subs/chapters from
 	//    the original, DV metadata stripped, marker stamped.
+	//    p8Mkv carries valid timestamps from the original container, so no
+	//    -fflags +genpts workaround is needed.
 	tmp := tmpPath(src.Path)
 	defer func() { _ = os.Remove(tmp) }()
-	bsf, bsfErr := bsfForCodec(src.Codec)
-	if bsfErr != nil {
-		return "", bsfErr
-	}
 	args := []string{
 		"-hide_banner", "-loglevel", "error", flagNoStats, "-y",
-		"-i", p8, "-i", src.Path,
+		"-i", p8Mkv,
+		"-i", src.Path,
 		flagMap, "0:v", flagMap, "1", flagMap, "-1:v",
 		"-map_chapters", "1",
 		"-c", "copy",
-		"-bsf:v", bsf,
+		"-bsf:v:0", doviRpuStrip,
 		"-max_muxing_queue_size", "2048",
 	}
 	args = append(args, markerArgs("dv-p5", "hdr10")...)
 	args = append(args, tmp)
-	if err := runFFmpeg(ctx, src, o, tmp, args...); err != nil {
+	if err := runFFmpeg(ctx, src, o, tmp, src.Path+":remux", args...); err != nil {
 		return "", err
 	}
 	return publish(ctx, src, o)
