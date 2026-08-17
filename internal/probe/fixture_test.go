@@ -37,6 +37,7 @@ func ffprobeJSON(width, height int, codec, transfer, primaries string, dvProfile
 			"pix_fmt":         "yuv420p10le",
 			"color_transfer":  transfer,
 			"color_primaries": primaries,
+			"r_frame_rate":    "24000/1001",
 			"side_data_list":  sd,
 		}},
 	}

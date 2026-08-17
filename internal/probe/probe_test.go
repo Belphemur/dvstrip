@@ -67,6 +67,18 @@ func TestParseActionMatrix(t *testing.T) {
 	}
 }
 
+func TestParseFrameRate(t *testing.T) {
+	info, err := Parse(fixtures["p4k_p5"])
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	// The remux of the P5 path passes this rational straight to ffmpeg's
+	// -framerate for the raw HEVC input, so it must round-trip verbatim.
+	if info.FrameRate != "24000/1001" {
+		t.Errorf("FrameRate = %q, want 24000/1001", info.FrameRate)
+	}
+}
+
 func TestParseErrors(t *testing.T) {
 	if _, err := Parse([]byte("not json")); err == nil {
 		t.Fatal("expected error for invalid json")

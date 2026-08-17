@@ -30,6 +30,7 @@ type stream struct {
 	PixFmt         string     `json:"pix_fmt"`
 	ColorTransfer  string     `json:"color_transfer"`
 	ColorPrimaries string     `json:"color_primaries"`
+	RFrameRate     string     `json:"r_frame_rate"`
 	SideDataList   []sideData `json:"side_data_list"`
 }
 
@@ -48,6 +49,7 @@ type Info struct {
 	PixFmt         string
 	ColorTransfer  string
 	ColorPrimaries string
+	FrameRate      string // r_frame_rate rational, e.g. "24000/1001"
 	HasDV          bool
 	DVProfile      int
 	DVCompat       int
@@ -121,7 +123,7 @@ func Probe(ctx context.Context, path string) (Info, error) {
 	out, err := exec.CommandContext(ctx, "ffprobe",
 		"-v", "error",
 		"-select_streams", "v:0",
-		"-show_entries", "stream=codec_name,width,height,pix_fmt,color_transfer,color_primaries:stream_side_data:format_tags",
+		"-show_entries", "stream=codec_name,width,height,pix_fmt,color_transfer,color_primaries,r_frame_rate:stream_side_data:format_tags",
 		"-of", "json",
 		path,
 	).Output()
@@ -156,6 +158,7 @@ func Parse(raw []byte) (Info, error) {
 		PixFmt:         s.PixFmt,
 		ColorTransfer:  s.ColorTransfer,
 		ColorPrimaries: s.ColorPrimaries,
+		FrameRate:      s.RFrameRate,
 	}
 	for _, sd := range s.SideDataList {
 		t := strings.ToLower(sd.SideDataType)

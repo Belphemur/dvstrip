@@ -10,7 +10,7 @@ FROM alpine:latest
 # just those two from it. Everything is native musl — no libc mismatch.
 RUN set -eux; \
     echo "https://dl-cdn.alpinelinux.org/alpine/edge/community" >> /etc/apk/repositories; \
-    apk add --no-cache jellyfin-ffmpeg dovi-tool hdr10plus-tool; \
+    apk add --no-cache jellyfin-ffmpeg dovi-tool hdr10plus-tool mkvtoolnix; \
     ln -sf /usr/lib/jellyfin-ffmpeg/ffmpeg  /usr/local/bin/ffmpeg; \
     ln -sf /usr/lib/jellyfin-ffmpeg/ffprobe /usr/local/bin/ffprobe
 

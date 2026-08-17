@@ -83,6 +83,50 @@ func TestStripArgs(t *testing.T) {
 	})
 }
 
+func TestP5TimingArgs(t *testing.T) {
+	args := p5TimingArgs("/tmp/p8.hevc", "/tmp/timed.mkv", "24000/1001")
+	joined := strings.Join(args, " ")
+	for _, want := range []string{
+		"-o /tmp/timed.mkv",
+		"--default-duration 0:24000/1001p /tmp/p8.hevc", // explicit rational fps
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("args missing %q: %s", want, joined)
+		}
+	}
+
+	noDur := p5TimingArgsNoDur("/tmp/p8.hevc", "/tmp/timed.mkv")
+	joined = strings.Join(noDur, " ")
+	if slices.Contains(noDur, "--default-duration") {
+		t.Errorf("fallback must not set explicit duration: %v", noDur)
+	}
+	if !strings.Contains(joined, "-o /tmp/timed.mkv /tmp/p8.hevc") {
+		t.Errorf("fallback missing output+input: %s", joined)
+	}
+}
+
+func TestP5MergeArgs(t *testing.T) {
+	args := p5MergeArgs("/tmp/timed.mkv", "/in/movie.mkv")
+	joined := strings.Join(args, " ")
+
+	for _, want := range []string{
+		"-i /tmp/timed.mkv", // timed P5 base layer
+		"-i /in/movie.mkv",  // audio/subs/chapters source
+		"-map 0:v",          // video from the timed stream
+		"-map -1:v",         // drop the original DV video
+		"-map_chapters 1",
+		doviRpuStrip, // DV metadata stripped at remux
+		"-max_muxing_queue_size 2048",
+	} {
+		if !strings.Contains(joined, want) {
+			t.Errorf("args missing %q: %s", want, joined)
+		}
+	}
+	if args[len(args)-1] != "2048" {
+		t.Errorf("merge args must leave the output + marker for the caller: %v", args)
+	}
+}
+
 func TestVerifyOutput(t *testing.T) {
 	base := probe.Info{Width: 3840, Processed: true}
 	cases := []struct {

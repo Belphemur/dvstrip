@@ -12,7 +12,7 @@ Guidance for AI agents (and humans) working in this repository.
 
 - Go (see `go.mod` for the version), `cobra` + `viper` (CLI/config), `zerolog` (logging), `fsnotify` (watching), `vbauerster/mpb/v8` (per-file progress bars). No test frameworks — stdlib `testing` only.
 - Module path: `github.com/Belphemur/dvstrip`. All internal imports use the **full module path** (e.g. `github.com/Belphemur/dvstrip/internal/probe`), never a short prefix.
-- External runtime tools: `ffmpeg`/`ffprobe` (≥ 9.0 or a recent jellyfin-ffmpeg with `dovi_rpu=strip=1` support), `dovi_tool` (P5 only), `hdr10plus_tool` (optional).
+- External runtime tools: `ffmpeg`/`ffprobe` (≥ 9.0 or a recent jellyfin-ffmpeg with `dovi_rpu=strip=1` support), `dovi_tool` (P5 only), `mkvmerge` (P5 timing recovery), `hdr10plus_tool` (optional).
 
 ```
 cmd/                cobra commands + shared orchestration (no subprocess logic here)
@@ -22,13 +22,13 @@ cmd/                cobra commands + shared orchestration (no subprocess logic h
   watch_scheduler.go fileScheduler: size-settling debounce, generation-guarded timers, Close() flush
 internal/
   probe/            ffprobe wrapper. Probe() = exec + Parse(); Parse() is pure and fixture-tested.
-  convert/          ffmpeg/dovi_tool wrappers, progress plumbing, tmp→verify→publish
+  convert/          ffmpeg/dovi_tool/mkvmerge wrappers, progress plumbing, tmp→verify→publish
   display/          multi-bar terminal renderer; owns all terminal writes
   queue/            fixed worker pool, per-path dedup, AutoWorkers
 docs/               user/developer documentation (mermaid diagrams)
 .github/workflows/  ci.yml (vet/test/lint/integration/goreleaser snapshot → single `gate` job for branch protection) + release.yml (tags → GHCR)
 renovate.json       Renovate: automerge every dependency PR once `gate` is green (needs the Mend app installed + repo allow_auto_merge)
-Dockerfile          alpine + jellyfin-ffmpeg + dovi-tool + hdr10plus-tool
+Dockerfile          alpine + jellyfin-ffmpeg + dovi-tool + mkvtoolnix + hdr10plus-tool
 .goreleaser.yaml    Linux binaries (amd64+arm64 tar.gz + checksums on the GitHub Release) + dockers_v2 (linux/amd64+arm64)
 ```
 
@@ -50,7 +50,7 @@ Integration tests (real ffmpeg) are build-tagged and skipped by default:
 go test -tags integration ./internal/convert/ -v
 ```
 
-Note: the StripDV integration tests **skip** if the host ffmpeg lacks `dovi_rpu=strip=1` support (needs ffmpeg ≥ 9.0 or a recent jellyfin-ffmpeg). CI runs them in the `integration` job against a pinned portable jellyfin-ffmpeg (version in `ci.yml`'s `JELLYFIN_FFMPEG`). The container image always has a working ffmpeg.
+Note: the StripDV integration tests **skip** if the host ffmpeg lacks `dovi_rpu=strip=1` support (needs ffmpeg ≥ 9.0 or a recent jellyfin-ffmpeg); the P5 integration test additionally needs `dovi_tool` and `mkvmerge` on PATH and skips otherwise. CI runs them in the `integration` job against a pinned portable jellyfin-ffmpeg (version in `ci.yml`'s `JELLYFIN_FFMPEG`) with mkvtoolnix installed. The container image always has a working toolchain.
 
 ## Non-negotiable invariants (do not break these)
 

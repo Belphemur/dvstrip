@@ -6,7 +6,7 @@
 - golangci-lint v2
 - goreleaser v2
 - docker with buildx (for the container part of the pipeline)
-- ffmpeg/ffprobe/dovi_tool on PATH only if you want to run the real binary locally (unit tests don't need them). For the integration tests you need `dovi_rpu=strip=1` support (ffmpeg ≥ 9.0 or a recent jellyfin-ffmpeg). On Arch/CachyOS: `sudo pacman -S jellyfin-ffmpeg`, then symlink its binaries like the Dockerfile does: `sudo ln -sf /usr/lib/jellyfin-ffmpeg/{ffmpeg,ffprobe} /usr/local/bin/`
+- ffmpeg/ffprobe/dovi_tool/mkvmerge on PATH only if you want to run the real binary locally (unit tests don't need them). For the integration tests you need `dovi_rpu=strip=1` support (ffmpeg ≥ 9.0 or a recent jellyfin-ffmpeg); the P5 integration test additionally needs `dovi_tool` and `mkvmerge` on PATH. On Arch/CachyOS: `sudo pacman -S jellyfin-ffmpeg`, then symlink its binaries like the Dockerfile does: `sudo ln -sf /usr/lib/jellyfin-ffmpeg/{ffmpeg,ffprobe} /usr/local/bin/` (+ `sudo pacman -S mkvtoolnix-cli` for `mkvmerge`).
 
 ## Layout
 

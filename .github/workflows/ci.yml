@@ -40,6 +40,8 @@ jobs:
         run: |
           ffmpeg -version | head -1
           ffmpeg -hide_banner -h bsf=dovi_rpu | grep -q strip
+      - name: Install mkvtoolnix
+        run: sudo apt-get update && sudo apt-get install -y mkvtoolnix
       - run: go test -tags integration ./internal/convert/ -v -race -count=1
 
   lint:

@@ -82,11 +82,12 @@ ffmpeg -hide_banner -loglevel error -nostats -y \
 
 DV profile 5 has no HDR10-compatible base layer (it uses IPTPQc2 colors), so a bare strip would produce broken colors. The pipeline instead reshapes the DV metadata first — still no pixel re-encoding:
 
-1. `ffmpeg -i <in> -map 0:v:0 -c:v copy -bsf:v hevc_mp4toannexb -f matroska <tmp>/bl.mkv` — extract the base layer into an MKV container so timestamps survive the later remux.
-2. `dovi_tool -m 2 convert --discard bl.mkv -o p8.mkv` — convert the RPU mapping from profile 5 to 8.1 and discard the enhancement layer.
-3. Remux: `-i p8.mkv -i <in> -map 0:v -map 1 -map -1:v -map_chapters 1 -c copy -bsf:v:0 dovi_rpu=strip=1` — video from the converted stream, everything else (audio, subs, chapters) from the original, DV metadata stripped, marker stamped.
+1. `ffmpeg -i <in> -map 0:v:0 -c:v copy -bsf:v hevc_mp4toannexb -f hevc <tmp>/bl.hevc` — extract the base layer as a raw Annex-B HEVC elementary stream. It must stay raw: dovi_tool (latest release 2.3.3) only reads elementary streams and rejects containers (`Matroska input is unsupported`).
+2. `dovi_tool -m 2 convert --discard bl.hevc -o p8.hevc` — convert the RPU mapping from profile 5 to 8.1 and discard the enhancement layer.
+3. Timing recovery: `mkvmerge -o timed.mkv --default-duration 0:<fps>p p8.hevc` — assign real timestamps to the raw stream (`<fps>` is the probed `r_frame_rate`, e.g. `24000/1001`). mkvmerge is the MKV-native equivalent of Tdarr's MP4Box; it is retried without `--default-duration` (auto-detecting the rate from the VUI) if the explicit rational form is rejected.
+4. Merge: `-i timed.mkv -i <in> -map 0:v -map 1 -map -1:v -map_chapters 1 -c copy -bsf:v:0 dovi_rpu=strip=1` — video from the timed stream (everything else: audio, subs, chapters from the original), DV metadata stripped, marker stamped.
 
-The MKV intermediate keeps container timestamps intact; a raw HEVC elementary stream carries no timestamps, which causes the later remux to fail with `Can't write packet with unknown timestamp`.
+Why mkvmerge is needed: a raw HEVC elementary stream carries no container timestamps, and ffmpeg's h265 demuxer never generates them in the jellyfin-ffmpeg builds we target — so feeding the stream straight into the merge step aborts the mux with `Can't write packet with unknown timestamp`. No `-framerate`/`-genpts`/`-fps_mode` combination fixes this; only a real container muxer (mkvmerge here) can assign the timestamps.
 
 See [hdr-metadata.md](hdr-metadata.md) for why this is done and the color-accuracy caveat.
 
@@ -134,7 +135,7 @@ Progress display is on by default (`--no-progress` opts out; `--log-json` forces
 
 1. ffmpeg runs with `-nostats -progress pipe:1`, emitting machine-readable `key=value` blocks.
 2. `convert.runFFmpeg` parses `total_size=N` lines and feeds them into `internal/display.Tracker`, keyed by file path (bar max = source file size; stream-copy output ≈ input, so the estimate is accurate). The bar description is just the file's basename, followed by percent, humanized `current/total` bytes, rate and `[elapsed:eta]` — the phase adds nothing when every bar belongs to the same pipeline.
-3. `dovi_tool` (no progress output) gets an indeterminate spinner instead.
+3. `dovi_tool` and `mkvmerge` (no progress output) get an indeterminate spinner instead.
 4. The tracker renders every active bar as its own line at the bottom of the terminal (via [mpb](https://github.com/vbauerster/mpb), which redraws the bar block in place). **All log writes go through the tracker's writer**, which prints them above the bars — so logs and bars never interleave. On a non-TTY (docker logs, redirected stderr, CI) mpb renders nothing; instead the tracker emits a `progress: <file> N%` log line each time a bar crosses a 10% milestone, so captured logs stay clean while still showing progress.
 
 ## 7. Disk-space gating

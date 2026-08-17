@@ -54,7 +54,7 @@ flowchart LR
     MK -->|"yes"| SKIP1["skip (use --force)"]
     MK -->|"no"| DV{"Dolby Vision?"}
     DV -->|"no"| SKIP2["already HDR10"]
-    DV -->|"profile 5"| CV["dovi_tool: P5 → P8.1 → strip"]
+    DV -->|"profile 5"| CV["dovi_tool + mkvmerge: P5 → P8.1 → strip"]
     DV -->|"compat 1/6"| ST["ffmpeg: strip RPU → HDR10"]
     DV -->|"other"| MAN["manual handling"]
     CV --> PB["verify tmp → atomic rename"]
@@ -70,6 +70,7 @@ Every step is lossless stream copy — pixels are never decoded. Detail: [docs/h
 | ffmpeg ≥ 9.0 (or a recent jellyfin-ffmpeg) | `dovi_rpu=strip=1` bitstream filter — check with `ffmpeg -h bsf=dovi_rpu` |
 | ffprobe | Metadata detection |
 | dovi_tool | DV profile 5 conversion only |
+| mkvmerge (mkvtoolnix) | P5 timing recovery — raw HEVC carries no timestamps |
 | hdr10plus_tool | Optional |
 
 Install from source: `go install github.com/Belphemur/dvstrip@latest`

@@ -4,6 +4,7 @@ package convert
 
 import (
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -111,10 +112,80 @@ func TestStripDVIntegration(t *testing.T) {
 	}
 }
 
-// TestStripDVWithCoverArt regress-tests the -bsf:v:0 pinning: a file with an
-// attached mjpeg cover made a bare -bsf:v abort ("Codec 'mjpeg' is not
-// supported by the bitstream filter"). The strip must succeed and the cover
-// must survive the remux.
+// requireBin skips the test when any of the named binaries is missing.
+func requireBin(t *testing.T, bins ...string) {
+	t.Helper()
+	for _, bin := range bins {
+		if _, err := exec.LookPath(bin); err != nil {
+			t.Skipf("%s not available", bin)
+		}
+	}
+}
+
+// TestP5Integration regress-tests the P5 (profile 5 → HDR10) conversion, which
+// shipped broken in v0.6.3: the raw HEVC base layer carries no timestamps and
+// ffmpeg's h265 demuxer never generates them, so the remux aborts with
+// "Can't write packet with unknown timestamp". The fix times the stream with
+// mkvmerge before the final ffmpeg merge. Skips when dovi_tool or mkvmerge is
+// missing, or the host ffmpeg lacks dovi_rpu=strip.
+func TestP5Integration(t *testing.T) {
+	skipWithoutTools(t)
+	requireBin(t, "dovi_tool", "mkvmerge")
+	if !removeDVISupported(t) {
+		t.Skip("host ffmpeg lacks dovi_rpu=strip support (need ffmpeg >= 9.0 or a recent jellyfin-ffmpeg)")
+	}
+	ctx := context.Background()
+
+	// The committed fixture is real 4K P5 MKV; copy it to a writable dir so
+	// the in-place tmp/output writes don't touch testdata.
+	src := filepath.Join(t.TempDir(), "p5.mkv")
+	in, err := os.Open("testdata/p5_fixture.mkv")
+	if err != nil {
+		t.Fatalf("open fixture: %v", err)
+	}
+	out, err := os.Create(src)
+	if err != nil {
+		t.Fatalf("create copy: %v", err)
+	}
+	if _, err := io.Copy(out, in); err != nil {
+		t.Fatalf("copy fixture: %v", err)
+	}
+	_ = in.Close()
+	_ = out.Close()
+
+	info, err := probe.Probe(ctx, src)
+	if err != nil {
+		t.Fatalf("probe fixture: %v", err)
+	}
+	if !info.IsDVP5() {
+		t.Fatalf("fixture not classified as P5: %+v", info)
+	}
+
+	tr := display.New(os.Stderr)
+	defer tr.Close()
+	dst, err := P5(ctx, info, Options{Suffix: ".hdr10", Progress: tr})
+	if err != nil {
+		t.Fatalf("P5 conversion: %v", err)
+	}
+	if _, err := os.Stat(dst); err != nil {
+		t.Fatalf("output missing: %v", err)
+	}
+
+	oi, err := probe.Probe(ctx, dst)
+	if err != nil {
+		t.Fatalf("probe output: %v", err)
+	}
+	if oi.Width != info.Width {
+		t.Errorf("width changed: %d -> %d", info.Width, oi.Width)
+	}
+	if oi.HasDV {
+		t.Error("output still reports Dolby Vision")
+	}
+	if !oi.Processed {
+		t.Error("dvstrip marker (dvstrip=1) missing on output")
+	}
+}
+
 func TestStripDVWithCoverArt(t *testing.T) {
 	skipWithoutTools(t)
 	if !removeDVISupported(t) {

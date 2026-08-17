@@ -280,10 +280,11 @@ func StripDV(ctx context.Context, src probe.Info, o Options) (string, error) {
 	return publish(ctx, src, o)
 }
 
-// P5 handles DV profile 5: extract the base layer into an MKV container
-// (preserving original timestamps), reshape the RPU from profile 5 to 8.1 and
-// discard the enhancement layer with dovi_tool, then remux and strip DV
-// metadata to land on HDR10. No pixel re-encoding happens.
+// P5 handles DV profile 5: extract the base layer as a raw Annex-B HEVC
+// elementary stream, reshape the RPU from profile 5 to 8.1 and discard the
+// enhancement layer with dovi_tool (which, through the latest release 2.3.3,
+// only reads elementary streams — never MKV/MP4 containers), then remux and
+// strip DV metadata to land on HDR10. No pixel re-encoding happens.
 //
 // CAVEAT: a P5 base layer is not true HDR10 (IPTPQc2). The result renders
 // correctly on DV-aware players via the reshaped RPU path, but as plain
@@ -291,6 +292,9 @@ func StripDV(ctx context.Context, src probe.Info, o Options) (string, error) {
 func P5(ctx context.Context, src probe.Info, o Options) (string, error) {
 	if _, err := exec.LookPath("dovi_tool"); err != nil {
 		return "", fmt.Errorf("dovi_tool not found in PATH (set p5-mode=skip to ignore P5)")
+	}
+	if _, err := exec.LookPath("mkvmerge"); err != nil {
+		return "", fmt.Errorf("mkvmerge not found in PATH (required for P5 timing recovery)")
 	}
 
 	// Reserve destination space before doing any work: in replace mode this
@@ -308,48 +312,95 @@ func P5(ctx context.Context, src probe.Info, o Options) (string, error) {
 		return "", fmt.Errorf("temp dir: %w", err)
 	}
 	defer func() { _ = os.RemoveAll(dir) }()
-	blMkv := filepath.Join(dir, "bl.mkv") // base layer with timestamps preserved
-	p8Mkv := filepath.Join(dir, "p8.mkv") // dovi_tool output with timestamps
+	blHevc := filepath.Join(dir, "bl.hevc") // base layer as raw Annex-B HEVC
+	p8Hevc := filepath.Join(dir, "p8.hevc") // dovi_tool output
 
-	// 1) extract base layer into an MKV container so timestamps survive.
-	//    A raw HEVC elementary stream (contrast: StripDV's -f hevc) carries
-	//    no container timestamps, which breaks the later remux with
-	//    "Can't write packet with unknown timestamp".
-	if err := runFFmpeg(ctx, src, o, blMkv, src.Path,
+	// 1) extract the base layer into a raw HEVC elementary stream. dovi_tool
+	//    (2.3.3, the latest release) rejects containers — "Matroska input is
+	//    unsupported" — so the stream must stay raw; step 3 recovers the
+	//    timestamps lost by the raw demuxer via mkvmerge.
+	if err := runFFmpeg(ctx, src, o, blHevc, src.Path,
 		"-hide_banner", "-loglevel", "error", flagNoStats, "-y",
 		"-i", src.Path, flagMap, "0:v:0", "-c:v", "copy",
-		"-bsf:v", "hevc_mp4toannexb", blMkv); err != nil {
+		"-bsf:v", "hevc_mp4toannexb", "-f", "hevc", blHevc); err != nil {
 		return "", fmt.Errorf("extract hevc: %w", err)
 	}
 
 	// 2) reshape RPU: profile 5 -> 8.1, drop the enhancement layer.
-	//    dovi_tool reads the MKV container and writes an MKV back, keeping
-	//    valid timestamps that the raw-HEVC path would lose.
 	if err := runSpinner(ctx, src, o,
-		"dovi_tool", "-m", "2", "convert", "--discard", blMkv, "-o", p8Mkv); err != nil {
+		"dovi_tool", "-m", "2", "convert", "--discard", blHevc, "-o", p8Hevc); err != nil {
 		return "", fmt.Errorf("dovi_tool convert: %w", err)
 	}
 
-	// 3) remux: video from the converted stream, audio/subs/chapters from
-	//    the original, DV metadata stripped, marker stamped.
-	//    p8Mkv carries valid timestamps from the original container, so no
-	//    -fflags +genpts workaround is needed.
+	// 3) timing recovery: the raw converted HEVC stream carries no container
+	//    timestamps — ffmpeg's h265 demuxer never generates them in the
+	//    jellyfin-ffmpeg builds we target, so a later ffmpeg mux aborts with
+	//    "Can't write packet with unknown timestamp". mkvmerge (the MKV-native
+	//    equivalent of Tdarr's MP4Box) assigns real timestamps; prefer the
+	//    explicit probed rate, fall back to auto-detect if it rejects it.
+	timedMkv := filepath.Join(dir, "timed.mkv")
+	if err := runP5Timing(ctx, src, o, p8Hevc, timedMkv, src.FrameRate); err != nil {
+		return "", err
+	}
+
+	// 4) merge: video from the timed stream, audio/subs/chapters from the
+	//    original, DV metadata stripped, marker stamped.
 	tmp := tmpPath(src.Path)
 	defer func() { _ = os.Remove(tmp) }()
-	args := []string{
-		"-hide_banner", "-loglevel", "error", flagNoStats, "-y",
-		"-i", p8Mkv,
-		"-i", src.Path,
-		flagMap, "0:v", flagMap, "1", flagMap, "-1:v",
-		"-map_chapters", "1",
-		"-c", "copy",
-		"-bsf:v:0", doviRpuStrip,
-		"-max_muxing_queue_size", "2048",
-	}
+	args := p5MergeArgs(timedMkv, src.Path)
 	args = append(args, markerArgs("dv-p5", "hdr10")...)
 	args = append(args, tmp)
 	if err := runFFmpeg(ctx, src, o, tmp, src.Path+":remux", args...); err != nil {
 		return "", err
 	}
 	return publish(ctx, src, o)
+}
+
+// runP5Timing runs mkvmerge to attach real timestamps to the raw converted
+// HEVC stream. It prefers --default-duration with the probed rational frame
+// rate (e.g. "24000/1001p"); if mkvmerge rejects that form it retries, letting
+// mkvmerge auto-detect the rate from the stream's VUI. The exec itself is the
+// only side effect.
+func runP5Timing(ctx context.Context, src probe.Info, o Options, p8, timed, fps string) error {
+	if fps == "" || fps == "0/0" {
+		return runSpinner(ctx, src, o, "mkvmerge", p5TimingArgsNoDur(p8, timed)...)
+	}
+	if err := runSpinner(ctx, src, o, "mkvmerge", p5TimingArgs(p8, timed, fps)...); err != nil {
+		// Explicit rate rejected — retry letting mkvmerge auto-detect.
+		return runSpinner(ctx, src, o, "mkvmerge", p5TimingArgsNoDur(p8, timed)...)
+	}
+	return nil
+}
+
+// p5TimingArgs builds the explicit mkvmerge timing command: assign a real
+// default frame duration to track 0 from the probed rational rate. mkvmerge
+// parses fps as a rational with the trailing "p" (e.g. "24000/1001p"). Pure
+// and unit-tested.
+func p5TimingArgs(p8, timed, fps string) []string {
+	return []string{"-o", timed, "--default-duration", "0:" + fps + "p", p8}
+}
+
+// p5TimingArgsNoDur is the mkvmerge fallback when the explicit rate form is
+// rejected: let mkvmerge auto-detect the duration from the stream's VUI. Pure
+// and unit-tested.
+func p5TimingArgsNoDur(p8, timed string) []string {
+	return []string{"-o", timed, p8}
+}
+
+// p5MergeArgs builds the final ffmpeg merge for the P5 path: video from the
+// timestamped stream (timed), everything else from the original src, DV
+// metadata stripped via the dovi_rpu bitstream filter. Pure and unit-tested:
+// the caller appends the marker args and the output path (last, so ffmpeg
+// guesses the muxer from its extension).
+func p5MergeArgs(timed, src string) []string {
+	return []string{
+		"-hide_banner", "-loglevel", "error", flagNoStats, "-y",
+		"-i", timed,
+		"-i", src,
+		flagMap, "0:v", flagMap, "1", flagMap, "-1:v",
+		"-map_chapters", "1",
+		"-c", "copy",
+		"-bsf:v:0", doviRpuStrip,
+		"-max_muxing_queue_size", "2048",
+	}
 }
