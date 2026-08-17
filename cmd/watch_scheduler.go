@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -44,12 +45,15 @@ func newFileScheduler(delay time.Duration, submit func(string)) *fileScheduler {
 // schedule records an event for path. The file will be submitted once its
 // size has remained stable for the configured debounce interval.
 func (s *fileScheduler) schedule(path string) {
+	pkg.Debug().Str("file", filepath.Base(path)).Msg("scheduler.schedule called")
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	curSize := int64(-1)
 	if st, err := os.Stat(path); err == nil {
 		curSize = st.Size()
+	} else if err != nil {
+		pkg.Debug().Str("file", filepath.Base(path)).Err(err).Msg("scheduler.schedule: stat failed")
 	}
 
 	p, ok := s.timers[path]
@@ -80,30 +84,42 @@ func (s *fileScheduler) armLocked(path string, p *pendingFile) {
 // (removed or renamed away) is dropped without submitting; transient Stat
 // errors never count as a stable size.
 func (s *fileScheduler) checkAndSubmit(path string, p *pendingFile, gen uint64) {
+	pkg.Debug().Str("file", filepath.Base(path)).Uint64("gen", gen).Int64("stored_size", p.size).Msg("scheduler.checkAndSubmit")
 	s.mu.Lock()
 	cur, ok := s.timers[path]
 	if !ok || cur != p || p.gen != gen {
+		if !ok {
+			pkg.Debug().Str("file", filepath.Base(path)).Msg("checkAndSubmit: path removed from timers")
+		} else if cur != p {
+			pkg.Debug().Str("file", filepath.Base(path)).Msg("checkAndSubmit: stale entry (replacement)")
+		} else {
+			pkg.Debug().Str("file", filepath.Base(path)).Uint64("callback_gen", gen).Uint64("current_gen", p.gen).Msg("checkAndSubmit: stale generation — superseded")
+		}
 		s.mu.Unlock()
 		return
 	}
 	st, err := os.Stat(path)
 	switch {
 	case os.IsNotExist(err):
+		pkg.Debug().Str("file", filepath.Base(path)).Msg("checkAndSubmit: file no longer exists, dropping")
 		delete(s.timers, path)
 		s.mu.Unlock()
 		return
 	case err != nil:
 		// Transient I/O errors must not count as a stable size: retry.
+		pkg.Debug().Str("file", filepath.Base(path)).Err(err).Msg("checkAndSubmit: stat error, retrying")
 		s.armLocked(path, p)
 		s.mu.Unlock()
 		return
 	}
 	if st.Size() != p.size {
+		pkg.Debug().Str("file", filepath.Base(path)).Int64("old_size", p.size).Int64("new_size", st.Size()).Msg("checkAndSubmit: size changed, re-arming")
 		p.size = st.Size()
 		s.armLocked(path, p)
 		s.mu.Unlock()
 		return
 	}
+	pkg.Debug().Str("file", filepath.Base(path)).Int64("size", st.Size()).Msg("checkAndSubmit: size stable, submitting")
 	delete(s.timers, path)
 	s.mu.Unlock()
 	s.submit(path)
@@ -120,6 +136,7 @@ func (s *fileScheduler) Close() {
 	}
 	s.mu.Unlock()
 
+	pkg.Info().Int("count", len(pending)).Msg("scheduler.Close: flushing pending files")
 	for path := range pending {
 		s.submit(path)
 	}
@@ -139,6 +156,7 @@ func (s *fileScheduler) pendingCount() int {
 // settle. Walk failures are reported to onError so they are not silently
 // dropped.
 func (s *fileScheduler) scheduleDir(dir string, onError func(error)) {
+	pkg.Debug().Str("dir", dir).Msg("scheduler.scheduleDir called")
 	if err := walkVideos(dir, s.schedule); err != nil && onError != nil {
 		onError(err)
 	}
@@ -147,6 +165,7 @@ func (s *fileScheduler) scheduleDir(dir string, onError func(error)) {
 // queueSubmit adapts fileScheduler's submit callback to queue.Submit.
 func queueSubmit(q *queue.Queue) func(string) {
 	return func(path string) {
+		pkg.Debug().Str("file", filepath.Base(path)).Msg("scheduler submitted to queue")
 		q.Submit(queue.Job{Path: path})
 	}
 }

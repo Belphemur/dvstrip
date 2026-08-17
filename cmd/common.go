@@ -60,10 +60,15 @@ func isVideo(path string) bool {
 // run and must be ignored (marker output or in-flight tmp file).
 func isOwnOutput(path string) bool {
 	if convert.IsTemp(path) {
+		pkg.Debug().Str("file", filepath.Base(path)).Msg("isOwnOutput: temp file")
 		return true
 	}
 	stem := strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
-	return strings.Contains(stem, viper.GetString("suffix"))
+	if strings.Contains(stem, viper.GetString("suffix")) {
+		pkg.Debug().Str("file", filepath.Base(path)).Msg("isOwnOutput: dvstrip suffix")
+		return true
+	}
+	return false
 }
 
 // sweepTemp removes an in-flight remux file left behind by a crashed run
@@ -96,7 +101,12 @@ func walkVideos(dir string, visit func(path string)) error {
 			sweepTemp(path)
 			return nil
 		}
-		if !isVideo(path) || isOwnOutput(path) {
+		if !isVideo(path) {
+			pkg.Debug().Str("file", filepath.Base(path)).Str("ext", filepath.Ext(path)).Msg("walkVideos: skipped — not a video extension")
+			return nil
+		}
+		if isOwnOutput(path) {
+			pkg.Debug().Str("file", filepath.Base(path)).Msg("walkVideos: skipped — own output")
 			return nil
 		}
 		visit(path)

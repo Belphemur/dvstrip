@@ -41,9 +41,11 @@ var watchCmd = &cobra.Command{
 				return err
 			}
 			if d.IsDir() {
+				pkg.Debug().Str("dir", path).Msg("watching directory")
 				return watcher.Add(path)
 			}
 			if convert.IsTemp(path) {
+				pkg.Debug().Str("file", filepath.Base(path)).Msg("sweeping stale temp file")
 				sweepTemp(path)
 			}
 			return nil
@@ -80,9 +82,11 @@ var watchCmd = &cobra.Command{
 				if !ok {
 					return nil
 				}
+				pkg.Debug().Str("file", ev.Name).Str("op", ev.Op.String()).Msg("watcher event received")
 				if ev.Op&fsnotify.Create != 0 {
 					if st, err := os.Stat(ev.Name); err == nil && st.IsDir() {
 						// pick up new subdirectories
+						pkg.Debug().Str("dir", ev.Name).Msg("create event is a directory")
 						if err := watcher.Add(ev.Name); err != nil {
 							// Without the watch, files inside would be
 							// processed once but never monitored — skip
@@ -95,15 +99,26 @@ var watchCmd = &cobra.Command{
 						// and populated in one shot, or hard-linked in before the
 						// watcher was added). Schedule everything inside it so
 						// files settle like any other event path.
+						pkg.Debug().Str("dir", ev.Name).Msg("scanning existing files in new directory")
 						scheduler.scheduleDir(ev.Name, func(err error) {
 							pkg.Error().Err(err).Str("dir", ev.Name).Msg("failed to scan new directory")
 						})
 						continue
 					}
+					// Create event on a file (not a directory) — fall through
+					// to the scheduling logic below.
+					pkg.Debug().Str("file", filepath.Base(ev.Name)).Msg("create event on file")
 				}
 				// Rename-only events carry the old path, which no longer exists
 				// (the destination fires its own Create) — nothing to schedule.
 				if ev.Op&(fsnotify.Create|fsnotify.Write) == 0 || !isVideo(ev.Name) || isOwnOutput(ev.Name) {
+					if ev.Op&(fsnotify.Create|fsnotify.Write) == 0 {
+						pkg.Debug().Str("file", filepath.Base(ev.Name)).Str("op", ev.Op.String()).Msg("event filtered: no create/write op")
+					} else if !isVideo(ev.Name) {
+						pkg.Debug().Str("file", filepath.Base(ev.Name)).Str("ext", filepath.Ext(ev.Name)).Msg("event filtered: not a video extension")
+					} else {
+						pkg.Debug().Str("file", filepath.Base(ev.Name)).Msg("event filtered: own output")
+					}
 					continue
 				}
 				pkg.Debug().Str("file", filepath.Base(ev.Name)).Str("op", ev.Op.String()).Msg("event scheduled")
