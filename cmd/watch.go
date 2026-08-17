@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -35,16 +37,19 @@ var watchCmd = &cobra.Command{
 		defer func() { _ = watcher.Close() }()
 
 		// fsnotify is not recursive: watch the root and every existing subdir.
+		// Unreadable subtrees are skipped with a warning rather than aborting
+		// the whole watch (mirrors CBZOptimizer's tolerant addRecursiveWatch).
+		if err := addRecursiveWatch(watcher, dir); err != nil {
+			return fmt.Errorf("failed to watch path %s: %w", dir, err)
+		}
 		// Sweep any tmp files left behind by a crashed run while we are here.
+		// Tolerant of unreadable subtrees: skip (don't abort) on walk errors.
 		if err := filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 			if err != nil {
-				return err
+				pkg.Warn().Err(err).Str("path", path).Msg("skipping path while sweeping temp files")
+				return nil
 			}
-			if d.IsDir() {
-				pkg.Debug().Str("dir", path).Msg("watching directory")
-				return watcher.Add(path)
-			}
-			if convert.IsTemp(path) {
+			if !d.IsDir() && convert.IsTemp(path) {
 				pkg.Debug().Str("file", filepath.Base(path)).Msg("sweeping stale temp file")
 				sweepTemp(path)
 			}
@@ -83,11 +88,16 @@ var watchCmd = &cobra.Command{
 					return nil
 				}
 				pkg.Debug().Str("file", ev.Name).Str("op", ev.Op.String()).Msg("watcher event received")
-				if ev.Op&fsnotify.Create != 0 {
+				if ev.Has(fsnotify.Create) || ev.Has(fsnotify.Rename) {
 					if st, err := os.Stat(ev.Name); err == nil && st.IsDir() {
-						// pick up new subdirectories
-						pkg.Debug().Str("dir", ev.Name).Msg("create event is a directory")
-						if err := watcher.Add(ev.Name); err != nil {
+						// A directory was created or moved into the watched
+						// tree (IN_MOVED_TO surfaces as a Rename event on the
+						// live new path). Watch the whole subtree — not just
+						// the top dir — so files added later inside nested
+						// subdirs are still picked up, then schedule the
+						// existing contents through the scheduler.
+						pkg.Debug().Str("dir", ev.Name).Msg("directory arrival detected")
+						if err := addRecursiveWatch(watcher, ev.Name); err != nil {
 							// Without the watch, files inside would be
 							// processed once but never monitored — skip
 							// the scan to avoid that inconsistent state.
@@ -96,24 +106,22 @@ var watchCmd = &cobra.Command{
 						}
 						pkg.Info().Str("dir", ev.Name).Msg("new directory detected, now watching")
 						// The directory may already contain files (e.g. created
-						// and populated in one shot, or hard-linked in before the
-						// watcher was added). Schedule everything inside it so
-						// files settle like any other event path.
+						// and populated in one shot, moved in, or hard-linked in
+						// before the watcher was added). Schedule everything
+						// inside it so files settle like any other event path.
 						pkg.Debug().Str("dir", ev.Name).Msg("scanning existing files in new directory")
 						scheduler.scheduleDir(ev.Name, func(err error) {
 							pkg.Error().Err(err).Str("dir", ev.Name).Msg("failed to scan new directory")
 						})
 						continue
 					}
-					// Create event on a file (not a directory) — fall through
+					// Event on a file (not a directory) — fall through
 					// to the scheduling logic below.
-					pkg.Debug().Str("file", filepath.Base(ev.Name)).Msg("create event on file")
+					pkg.Debug().Str("file", filepath.Base(ev.Name)).Msg("event on file")
 				}
-				// Rename-only events carry the old path, which no longer exists
-				// (the destination fires its own Create) — nothing to schedule.
-				if ev.Op&(fsnotify.Create|fsnotify.Write) == 0 || !isVideo(ev.Name) || isOwnOutput(ev.Name) {
-					if ev.Op&(fsnotify.Create|fsnotify.Write) == 0 {
-						pkg.Debug().Str("file", filepath.Base(ev.Name)).Str("op", ev.Op.String()).Msg("event filtered: no create/write op")
+				if !shouldProcessWatchEvent(ev) || !isVideo(ev.Name) || isOwnOutput(ev.Name) {
+					if !shouldProcessWatchEvent(ev) {
+						pkg.Debug().Str("file", filepath.Base(ev.Name)).Str("op", ev.Op.String()).Msg("event filtered: no create/write/rename op")
 					} else if !isVideo(ev.Name) {
 						pkg.Debug().Str("file", filepath.Base(ev.Name)).Str("ext", filepath.Ext(ev.Name)).Msg("event filtered: not a video extension")
 					} else {
@@ -138,4 +146,44 @@ func init() {
 	if err := viper.BindPFlag("full-scan", watchCmd.Flags().Lookup("full-scan")); err != nil {
 		panic(err)
 	}
+}
+
+// addRecursiveWatch registers a watch on dir and every subdirectory beneath it.
+// Directories that can't be read (e.g. permission errors) are logged and
+// skipped instead of aborting the whole walk, so a single bad subtree doesn't
+// prevent the rest of the tree from being watched. A non-permission failure
+// adding a directory is returned so the caller can react (skip scheduling its
+// contents), matching the tolerant error policy used at watch startup.
+func addRecursiveWatch(watcher *fsnotify.Watcher, dir string) error {
+	return filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
+		if err != nil {
+			if errors.Is(err, fs.ErrPermission) {
+				pkg.Warn().Err(err).Str("dir", path).Msg("skipping unreadable directory")
+				return nil
+			}
+			pkg.Warn().Err(err).Str("dir", path).Msg("skipping path while setting up watch")
+			return nil
+		}
+		if !d.IsDir() {
+			return nil
+		}
+		if err := watcher.Add(path); err != nil {
+			if errors.Is(err, fs.ErrPermission) {
+				pkg.Warn().Err(err).Str("dir", path).Msg("skipping unreadable directory")
+				return nil
+			}
+			return fmt.Errorf("failed to watch directory %s: %w", path, err)
+		}
+		return nil
+	})
+}
+
+// shouldProcessWatchEvent reports whether an fsnotify event should be routed
+// toward the scheduler. Create, Write and Rename are all accepted: a file
+// moved into the watched tree on the same filesystem surfaces as an IN_MOVED_TO
+// Rename event (with the live path) and is never followed by a Create, while
+// the stale old-path event (IN_MOVED_FROM, Rename with the gone path, or a file
+// renamed away) is dropped later by the scheduler's existence check.
+func shouldProcessWatchEvent(ev fsnotify.Event) bool {
+	return ev.Has(fsnotify.Create) || ev.Has(fsnotify.Write) || ev.Has(fsnotify.Rename)
 }
