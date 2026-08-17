@@ -4,7 +4,7 @@
 # laid out per platform in the build context as $TARGETPLATFORM/dvstrip.
 FROM alpine:latest
 
-# jellyfin-ffmpeg (>= 7.1, includes hevc_metadata=remove_dovi) ships in Alpine
+# A recent jellyfin-ffmpeg build with dovi_rpu=strip=1 support ships in Alpine
 # community; its binaries live under /usr/lib/jellyfin-ffmpeg/. dovi-tool and
 # hdr10plus-tool are only packaged in edge/community, so add that repo and pull
 # just those two from it. Everything is native musl — no libc mismatch.

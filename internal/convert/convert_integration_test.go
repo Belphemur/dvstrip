@@ -50,11 +50,11 @@ func skipWithoutTools(t *testing.T) {
 
 func removeDVISupported(t *testing.T) bool {
 	t.Helper()
-	out, err := exec.Command("ffmpeg", "-hide_banner", "-h", "bsf=hevc_metadata").CombinedOutput()
+	out, err := exec.Command("ffmpeg", "-hide_banner", "-h", "bsf=dovi_rpu").CombinedOutput()
 	if err != nil {
 		return false
 	}
-	return strings.Contains(string(out), "remove_dovi")
+	return strings.Contains(string(out), "strip")
 }
 
 // TestProgressPipeline exercises the -progress pipe → tracker path with a
@@ -67,7 +67,7 @@ func TestProgressPipeline(t *testing.T) {
 
 	tr := display.New(os.Stderr)
 	defer tr.Close()
-	err := runFFmpeg(context.Background(), info, Options{Progress: tr}, dst,
+	err := runFFmpeg(context.Background(), info, Options{Progress: tr}, dst, info.Path,
 		"-hide_banner", "-loglevel", "error", "-nostats", "-y",
 		"-i", info.Path, "-c", "copy", dst)
 	if err != nil {
@@ -79,11 +79,11 @@ func TestProgressPipeline(t *testing.T) {
 }
 
 // TestStripDVIntegration runs the real strip + verify + publish flow.
-// Skips when the host ffmpeg predates remove_dovi (< 7.1 / non-jellyfin).
+// Skips when the host ffmpeg predates the dovi_rpu=strip bitstream filter.
 func TestStripDVIntegration(t *testing.T) {
 	skipWithoutTools(t)
 	if !removeDVISupported(t) {
-		t.Skip("host ffmpeg lacks hevc_metadata=remove_dovi (need >= 7.1 or jellyfin-ffmpeg)")
+		t.Skip("host ffmpeg lacks dovi_rpu=strip support (need ffmpeg >= 9.0 or a recent jellyfin-ffmpeg)")
 	}
 	ctx := context.Background()
 	dir := t.TempDir()
@@ -118,7 +118,7 @@ func TestStripDVIntegration(t *testing.T) {
 func TestStripDVWithCoverArt(t *testing.T) {
 	skipWithoutTools(t)
 	if !removeDVISupported(t) {
-		t.Skip("host ffmpeg lacks hevc_metadata=remove_dovi (need >= 7.1 or jellyfin-ffmpeg)")
+		t.Skip("host ffmpeg lacks dovi_rpu=strip support (need ffmpeg >= 9.0 or a recent jellyfin-ffmpeg)")
 	}
 	ctx := context.Background()
 	dir := t.TempDir()

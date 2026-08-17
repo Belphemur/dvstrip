@@ -4,7 +4,7 @@ The official image bundles everything — no host dependencies:
 
 | Component | Source | Version |
 |---|---|---|
-| ffmpeg / ffprobe | Alpine `jellyfin-ffmpeg` package (symlinked onto PATH from `/usr/lib/jellyfin-ffmpeg/`) | 7.1.x (Jellyfin build, includes `hevc_metadata=remove_dovi`) |
+| ffmpeg / ffprobe | Alpine `jellyfin-ffmpeg` package (symlinked onto PATH from `/usr/lib/jellyfin-ffmpeg/`) | recent Jellyfin build with `dovi_rpu=strip=1` support |
 | dovi_tool | Alpine edge/community `dovi-tool` | 2.3.x |
 | hdr10plus_tool | Alpine edge/community `hdr10plus-tool` | 1.7.x |
 | dvstrip | static Go binary (`CGO_ENABLED=0`) | the release tag |

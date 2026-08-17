@@ -12,7 +12,7 @@ Guidance for AI agents (and humans) working in this repository.
 
 - Go (see `go.mod` for the version), `cobra` + `viper` (CLI/config), `zerolog` (logging), `fsnotify` (watching), `vbauerster/mpb/v8` (per-file progress bars). No test frameworks — stdlib `testing` only.
 - Module path: `github.com/Belphemur/dvstrip`. All internal imports use the **full module path** (e.g. `github.com/Belphemur/dvstrip/internal/probe`), never a short prefix.
-- External runtime tools: `ffmpeg`/`ffprobe` (≥ 7.1 or jellyfin-ffmpeg — must support `hevc_metadata=remove_dovi`), `dovi_tool` (P5 only), `hdr10plus_tool` (optional).
+- External runtime tools: `ffmpeg`/`ffprobe` (≥ 9.0 or a recent jellyfin-ffmpeg with `dovi_rpu=strip=1` support), `dovi_tool` (P5 only), `hdr10plus_tool` (optional).
 
 ```
 cmd/                cobra commands + shared orchestration (no subprocess logic here)
@@ -50,7 +50,7 @@ Integration tests (real ffmpeg) are build-tagged and skipped by default:
 go test -tags integration ./internal/convert/ -v
 ```
 
-Note: the StripDV integration tests **skip** if the host ffmpeg lacks `remove_dovi` (needs ≥ 7.1 / jellyfin-ffmpeg). CI runs them in the `integration` job against a pinned portable jellyfin-ffmpeg (version in `ci.yml`'s `JELLYFIN_FFMPEG`). The container image always has a working ffmpeg.
+Note: the StripDV integration tests **skip** if the host ffmpeg lacks `dovi_rpu=strip=1` support (needs ffmpeg ≥ 9.0 or a recent jellyfin-ffmpeg). CI runs them in the `integration` job against a pinned portable jellyfin-ffmpeg (version in `ci.yml`'s `JELLYFIN_FFMPEG`). The container image always has a working ffmpeg.
 
 ## Non-negotiable invariants (do not break these)
 
@@ -76,7 +76,7 @@ Note: the StripDV integration tests **skip** if the host ffmpeg lacks `remove_do
 
 ## Environment gotchas
 
-- Host ffmpeg may be < 7.1 (no `remove_dovi`); the Docker image is the reference environment. On Arch/CachyOS: `sudo pacman -S jellyfin-ffmpeg` then symlink `/usr/lib/jellyfin-ffmpeg/{ffmpeg,ffprobe}` into `/usr/local/bin` (same as the Dockerfile) so the bare `ffmpeg` name resolves to the jellyfin build.
+- Host ffmpeg may be older than the `dovi_rpu` filter (ffmpeg ≥ 9.0 or a recent jellyfin-ffmpeg); the Docker image is the reference environment. On Arch/CachyOS: `sudo pacman -S jellyfin-ffmpeg` then symlink `/usr/lib/jellyfin-ffmpeg/{ffmpeg,ffprobe}` into `/usr/local/bin` (same as the Dockerfile) so the bare `ffmpeg` name resolves to the jellyfin build.
 - fsnotify is not recursive — watch mode adds subdirs explicitly; inotify does not work on NFS/SMB mounts.
 - Watch-mode events never reach the queue directly: `fileScheduler` holds each path until its size is stable for the debounce window. Callbacks are generation-guarded (a stopped-but-fired `AfterFunc` is ignored), removed files are dropped without submitting, transient `Stat` errors retry, and `scheduler.Close()` flushes pending files before `q.Wait()` on shutdown.
 - Worker pool workers never exit (documented simplification); `Queue.Wait()` is the drain mechanism.
