@@ -16,7 +16,7 @@ flowchart TD
     C -->|"not HDR10 and not P5"| S3["skip"]
     C -->|"no Dolby Vision"| S4["already plain HDR10"]
     C -->|"DV profile 5"| P5["convert.ConvertP5<br/>dovi_tool -m 2 → P8.1 → strip"]
-    C -->|"DV compat 1 or 6"| SD["convert.StripDV<br/>hevc_metadata=remove_dovi=1"]
+    C -->|"DV compat 1 or 6"| SD["convert.StripDV<br/>dovi_rpu=strip=1"]
     C -->|"other DV"| W["warn: manual handling"]
     P5 --> V["verify tmp<br/>probe: parses, width unchanged,<br/>DV gone, marker present"]
     SD --> V
