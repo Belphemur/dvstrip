@@ -88,11 +88,12 @@ func (s *fileScheduler) checkAndSubmit(path string, p *pendingFile, gen uint64) 
 	s.mu.Lock()
 	cur, ok := s.timers[path]
 	if !ok || cur != p || p.gen != gen {
-		if !ok {
+		switch {
+		case !ok:
 			pkg.Debug().Str("file", filepath.Base(path)).Msg("checkAndSubmit: path removed from timers")
-		} else if cur != p {
+		case cur != p:
 			pkg.Debug().Str("file", filepath.Base(path)).Msg("checkAndSubmit: stale entry (replacement)")
-		} else {
+		default:
 			pkg.Debug().Str("file", filepath.Base(path)).Uint64("callback_gen", gen).Uint64("current_gen", p.gen).Msg("checkAndSubmit: stale generation — superseded")
 		}
 		s.mu.Unlock()
