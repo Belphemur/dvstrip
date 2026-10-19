@@ -70,7 +70,7 @@ services:
 
 - The container runs as **root by default**; files it writes are root-owned. On unRAID/NAS setups you usually want `-e PUID/PGID` behavior — the image doesn't ship s6, so either run with `--user 99:100` (unRAID `nobody:users`) or fix ownership with a cron `chown`. If you use `--user`, make sure that user can write the media directory.
 - Scanning a large library is I/O-bound; `--workers` above ~4 on HDD arrays buys nothing.
-- Watch mode on network mounts: fsnotify uses inotify, which **does not work on NFS/SMB mounts**. Point the watch at the local export, not the client mount.
+- **Watch mode and mount views:** fsnotify watches are bound to the mount view the watcher holds. On NFS/SMB/FUSE filesystems (including **Unraid SHFS**), a writer going through a *different* mount of the same data — e.g. dvstrip mounts `/mnt/disks/Videos` while sonarr/radarr mount `/mnt/user/Videos` — never fires inotify events, no matter how correct the watch code is. If possible, mount the writers into dvstrip through the **same path/view**. Because that isn't always possible, dvstrip ships a safety net: `--rescan-interval` (default `30m`) periodically walks the tree and picks up any new or changed files the events missed. Set `--rescan-interval 0` to disable it.
 
 ## Verifying an image you built locally
 

@@ -23,7 +23,7 @@ var scanCmd = &cobra.Command{
 		q.Start(cmd.Context())
 		pkg.Info().Str("dir", dir).Int("workers", workers).Msg("scanning")
 
-		if err := submitDir(q, dir); err != nil {
+		if err := submitDir(q, dir, nil); err != nil {
 			return err
 		}
 		q.Wait()

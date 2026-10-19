@@ -33,6 +33,7 @@ DVSTRIP_WORKERS=4 DVSTRIP_REPLACE=true dvstrip scan /media
 | `p5-mode` | `--p5-mode` | `DVSTRIP_P5_MODE` | `convert` | DV profile 5 handling: `convert` (dovi_tool reshape + strip) or `skip`. |
 | `hdr10plus` | `--hdr10plus` | `DVSTRIP_HDR10PLUS` | `false` | Preserve HDR10+ when present (it survives stream copy regardless); log explicit fallback to HDR10 when absent. |
 | `debounce` | `--debounce` | `DVSTRIP_DEBOUNCE` | `5s` | Watch mode: how long a file's size must stay stable before it's processed. |
+| `rescan-interval` | `--rescan-interval` | `DVSTRIP_RESCAN_INTERVAL` | `30m` | Watch mode: periodic full-directory rescan as a safety net for mounts where inotify doesn't deliver events from other mount views (Unraid SHFS/NFS/SMB). `0` disables. |
 | `full-scan` | `--full-scan` | `DVSTRIP_FULL_SCAN` | `false` | Watch mode only: enqueue the whole tree once at startup. |
 | `no-progress` | `--no-progress` | `DVSTRIP_NO_PROGRESS` | `false` | Disable per-file progress bars. Bars are **on by default**; they're forced off in `--log-json` mode so JSON stays machine-parseable. |
 | `log-level` | `--log-level` | `DVSTRIP_LOG_LEVEL` | `info` | `trace` \| `debug` \| `info` \| `warn` \| `error`. |
@@ -50,6 +51,7 @@ p5-mode: convert
 hdr10plus: true
 full-scan: true
 debounce: 5s
+rescan-interval: 30m
 no-progress: false
 extensions: [.mkv, .mp4, .ts, .m2ts]
 log-level: info

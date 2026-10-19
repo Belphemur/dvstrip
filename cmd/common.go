@@ -89,7 +89,25 @@ func sweepTemp(path string) {
 // walkVideos visits every processable video file under dir. In-flight tmp
 // files are swept instead of visited. Callers decide what to do with each
 // path (enqueue directly or schedule for settling).
+//
+// Only walks that run when no conversion can be mid-publish should sweep:
+// the startup full scan and new-directory arrivals. A walk that runs on a
+// timer while workers are converting must leave tmp files alone — use
+// walkVideosReadOnly for that.
 func walkVideos(dir string, visit func(path string)) error {
+	return walkTree(dir, visit, sweepTemp)
+}
+
+// walkVideosReadOnly visits every processable video file under dir without
+// touching tmp files. The periodic rescan uses this: it runs while workers
+// may be writing a tmp output, and removing that file would break the
+// verify/rename publish step of the in-flight conversion. Stale-tmp cleanup
+// remains the job of the sweeping walks (startup full scan, new-dir arrivals).
+func walkVideosReadOnly(dir string, visit func(path string)) error {
+	return walkTree(dir, visit, func(string) {})
+}
+
+func walkTree(dir string, visit func(path string), onTemp func(path string)) error {
 	return filepath.WalkDir(dir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
@@ -98,7 +116,7 @@ func walkVideos(dir string, visit func(path string)) error {
 			return nil
 		}
 		if convert.IsTemp(path) {
-			sweepTemp(path)
+			onTemp(path)
 			return nil
 		}
 		if !isVideo(path) {
@@ -114,9 +132,16 @@ func walkVideos(dir string, visit func(path string)) error {
 	})
 }
 
-// submitDir enqueues every video under dir (used by scan and watch --full-scan).
-func submitDir(q *queue.Queue, dir string) error {
+// submitDir enqueues every video under dir (used by scan and watch
+// --full-scan). When record is non-nil, each visited path is also handed to
+// it so the caller can seed a rescan cache from the same walk — the cache
+// then describes exactly the files this walk submitted, leaving no window
+// where a file could be cached unscheduled.
+func submitDir(q *queue.Queue, dir string, record func(path string)) error {
 	return walkVideos(dir, func(path string) {
+		if record != nil {
+			record(path)
+		}
 		q.Submit(queue.Job{Path: path})
 	})
 }
