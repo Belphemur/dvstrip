@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/Belphemur/dvstrip/internal/convert"
 	"github.com/Belphemur/dvstrip/internal/queue"
@@ -58,6 +59,8 @@ var watchCmd = &cobra.Command{
 			return err
 		}
 
+		warnIfInotifyBlind(dir)
+
 		pkg.Info().Str("dir", dir).Int("workers", workers).Msg("watching (Ctrl-C to stop)")
 
 		// Optional initial pass over everything on disk. Queue dedup means it
@@ -73,6 +76,20 @@ var watchCmd = &cobra.Command{
 		// wait for the file size to settle before submitting.
 		scheduler := newFileScheduler(viper.GetDuration("debounce"), queueSubmit(q))
 
+		// Periodic rescan fallback: fsnotify is bound to the mount view the
+		// watcher holds, so writers going through a different view of the same
+		// data (Unraid SHFS, NFS, SMB) never produce events. Every interval we
+		// walk the tree and schedule only new/changed files. A nil ticker
+		// channel blocks forever, which is exactly the disabled behavior.
+		fullScanRan := viper.GetBool("full-scan")
+		isFirstPass := true
+		cache := make(rescanCache)
+		var ticker *time.Ticker
+		if interval := viper.GetDuration("rescan-interval"); interval > 0 {
+			ticker = time.NewTicker(interval)
+			defer ticker.Stop()
+		}
+
 		for {
 			select {
 			case <-ctx.Done():
@@ -83,6 +100,24 @@ var watchCmd = &cobra.Command{
 				q.Wait()
 				printStats()
 				return nil
+			case <-ticker.C:
+				// The rescan walk runs inline in the event loop, exactly like
+				// scheduleDir today. Event delivery is paused for the duration
+				// of the walk, but the worker pool keeps draining, so nothing
+				// is lost. Running it inline (instead of a goroutine) means no
+				// rescan can race the scheduler's shutdown flush below.
+				snap, err := buildRescanSnapshot(dir)
+				if err != nil {
+					pkg.Warn().Err(err).Str("dir", dir).Msg("rescan: walk failed, skipping this pass")
+					continue
+				}
+				toSchedule, next := rescanDecide(snap, cache, isFirstPass, fullScanRan)
+				isFirstPass = false
+				cache = next
+				for _, path := range toSchedule {
+					pkg.Info().Str("file", filepath.Base(path)).Msg("rescan: new or changed file, scheduling")
+					scheduler.schedule(path)
+				}
 			case ev, ok := <-watcher.Events:
 				if !ok {
 					return nil
@@ -144,6 +179,11 @@ var watchCmd = &cobra.Command{
 func init() {
 	watchCmd.Flags().Bool("full-scan", false, "scan the whole directory once before watching for changes")
 	if err := viper.BindPFlag("full-scan", watchCmd.Flags().Lookup("full-scan")); err != nil {
+		panic(err)
+	}
+	watchCmd.Flags().Duration("rescan-interval", 30*time.Minute,
+		"periodic full-directory rescan as a safety net for mounts that don't deliver inotify events (0 disables)")
+	if err := viper.BindPFlag("rescan-interval", watchCmd.Flags().Lookup("rescan-interval")); err != nil {
 		panic(err)
 	}
 }
