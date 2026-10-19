@@ -1,7 +1,6 @@
 package cmd
 
 import (
-	"os"
 	"time"
 )
 
@@ -20,52 +19,26 @@ type rescanInfo struct {
 // the live tree.
 type rescanCache map[string]rescanInfo
 
-// buildRescanSnapshot walks dir with the shared eligibility rules
-// (walkVideos: extension allow-list, own-output and in-flight tmp filtering)
-// and records (size, mtime) for every processable file. A file that vanishes
-// between the walk and its stat is skipped with a warning.
-func buildRescanSnapshot(dir string) (rescanCache, error) {
-	snap := make(rescanCache)
-	err := walkVideos(dir, func(path string) {
-		info, statErr := os.Stat(path)
-		if statErr != nil {
-			l := log(path)
-			l.Warn().Err(statErr).Msg("rescan: stat failed, skipping file")
-			return
-		}
-		snap[path] = rescanInfo{size: info.Size(), mtime: info.ModTime()}
-	})
-	if err != nil {
-		return nil, err
-	}
-	return snap, nil
-}
-
 // rescanDecide is the pure change-detection seam of the rescan fallback:
-// given the fresh walk results, the previous cache, and whether the initial
-// full scan already submitted everything, it returns the paths to schedule
-// and the next cache state.
+// given the fresh walk results and the previous cache, it returns the paths
+// to schedule and the next cache state.
 //
 // A file is scheduled when it is absent from the previous cache (new) or its
 // (size, mtime) differ (changed). Vanished files are naturally absent from
 // the next cache, pruning them.
 //
-// First-pass semantics: the first tick runs with an empty prev cache. When
-// --full-scan was enabled, submitDir already submitted the whole tree, so the
-// first pass must populate the cache WITHOUT scheduling (no duplicate
-// thundering herd). Without a full scan, the first pass is a backfill: the
-// scheduler receives every file found, because inotify only reports changes
-// and pre-existing files would otherwise never be processed.
-func rescanDecide(current, prev rescanCache, isFirstPass, fullScanRan bool) (toSchedule []string, next rescanCache) {
+// The previous cache starts empty (no --full-scan: the first pass backfills
+// everything found, since inotify only reports changes and pre-existing files
+// would otherwise never be processed) or is seeded by the full-scan walk
+// itself (with --full-scan: the cache then describes exactly what the full
+// scan submitted, so the first rescan pass only schedules files that landed
+// after that walk — there is no first-pass suppression and no window in which
+// a new file could be cached without being scheduled).
+func rescanDecide(current, prev rescanCache) (toSchedule []string, next rescanCache) {
 	next = make(rescanCache, len(current))
 	for path, info := range current {
 		next[path] = info
-		prevInfo, seen := prev[path]
-		if seen && prevInfo == info {
-			continue
-		}
-		if isFirstPass && fullScanRan {
-			// The full scan owns these files; only record their state.
+		if prevInfo, seen := prev[path]; seen && prevInfo == info {
 			continue
 		}
 		toSchedule = append(toSchedule, path)

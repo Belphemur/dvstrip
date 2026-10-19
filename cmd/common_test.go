@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/Belphemur/dvstrip/internal/convert"
 	"github.com/spf13/viper"
 )
 
@@ -63,5 +64,32 @@ func TestSweepTemp(t *testing.T) {
 	sweepTemp(kept)
 	if _, err := os.Stat(kept); err != nil {
 		t.Errorf("non-temp file must not be removed: %v", err)
+	}
+}
+
+// TestWalkVideosReadOnlyLeavesTmpFiles pins the rescan-walk contract: the
+// read-only walk must SKIP tmp files without removing them — a periodic
+// rescan runs while workers may be mid-publish on a tmp file, and sweeping
+// it would break that conversion. The sweeping walk keeps its cleanup
+// behavior (crashed-run recovery).
+func TestWalkVideosReadOnlyLeavesTmpFiles(t *testing.T) {
+	dir := t.TempDir()
+	stale := filepath.Join(dir, convert.TempMarker+"movie.mkv")
+	if err := os.WriteFile(stale, []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := walkVideosReadOnly(dir, func(string) {}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(stale); err != nil {
+		t.Errorf("walkVideosReadOnly must not remove tmp files: %v", err)
+	}
+
+	if err := walkVideos(dir, func(string) {}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(stale); !os.IsNotExist(err) {
+		t.Errorf("walkVideos must still sweep tmp files, stat err: %v", err)
 	}
 }

@@ -64,10 +64,18 @@ var watchCmd = &cobra.Command{
 		pkg.Info().Str("dir", dir).Int("workers", workers).Msg("watching (Ctrl-C to stop)")
 
 		// Optional initial pass over everything on disk. Queue dedup means it
-		// is harmless if the watcher also fires for the same files.
+		// is harmless if the watcher also fires for the same files. The same
+		// walk seeds the rescan cache, so the cache starts out describing
+		// exactly what the full scan submitted — a file that lands later can
+		// never be mistaken for already-seen state.
+		cache := make(rescanCache)
 		if viper.GetBool("full-scan") {
 			pkg.Info().Str("dir", dir).Msg("full scan before watching")
-			if err := submitDir(q, dir); err != nil {
+			if err := submitDir(q, dir, func(path string) {
+				if info, err := os.Stat(path); err == nil {
+					cache[path] = rescanInfo{size: info.Size(), mtime: info.ModTime()}
+				}
+			}); err != nil {
 				return err
 			}
 		}
@@ -79,15 +87,13 @@ var watchCmd = &cobra.Command{
 		// Periodic rescan fallback: fsnotify is bound to the mount view the
 		// watcher holds, so writers going through a different view of the same
 		// data (Unraid SHFS, NFS, SMB) never produce events. Every interval we
-		// walk the tree and schedule only new/changed files. A nil ticker
-		// channel blocks forever, which is exactly the disabled behavior.
-		fullScanRan := viper.GetBool("full-scan")
-		isFirstPass := true
-		cache := make(rescanCache)
-		var ticker *time.Ticker
+		// walk the tree and schedule only new/changed files. A nil channel
+		// blocks forever in a select, which is exactly the disabled behavior.
+		var tickerC <-chan time.Time
 		if interval := viper.GetDuration("rescan-interval"); interval > 0 {
-			ticker = time.NewTicker(interval)
+			ticker := time.NewTicker(interval)
 			defer ticker.Stop()
+			tickerC = ticker.C
 		}
 
 		for {
@@ -100,19 +106,29 @@ var watchCmd = &cobra.Command{
 				q.Wait()
 				printStats()
 				return nil
-			case <-ticker.C:
+			case <-tickerC:
 				// The rescan walk runs inline in the event loop, exactly like
 				// scheduleDir today. Event delivery is paused for the duration
 				// of the walk, but the worker pool keeps draining, so nothing
 				// is lost. Running it inline (instead of a goroutine) means no
 				// rescan can race the scheduler's shutdown flush below.
-				snap, err := buildRescanSnapshot(dir)
+				// The walk is read-only: workers may be mid-publish on a tmp
+				// file, and sweeping it here would break that conversion.
+				snap := make(rescanCache)
+				err := walkVideosReadOnly(dir, func(path string) {
+					info, statErr := os.Stat(path)
+					if statErr != nil {
+						l := log(path)
+						l.Warn().Err(statErr).Msg("rescan: stat failed, skipping file")
+						return
+					}
+					snap[path] = rescanInfo{size: info.Size(), mtime: info.ModTime()}
+				})
 				if err != nil {
 					pkg.Warn().Err(err).Str("dir", dir).Msg("rescan: walk failed, skipping this pass")
 					continue
 				}
-				toSchedule, next := rescanDecide(snap, cache, isFirstPass, fullScanRan)
-				isFirstPass = false
+				toSchedule, next := rescanDecide(snap, cache)
 				cache = next
 				for _, path := range toSchedule {
 					pkg.Info().Str("file", filepath.Base(path)).Msg("rescan: new or changed file, scheduling")
