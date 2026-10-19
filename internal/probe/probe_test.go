@@ -39,7 +39,7 @@ func TestParseActionMatrix(t *testing.T) {
 			if info.IsHDR10() != c.hdr10 {
 				t.Errorf("IsHDR10() = %v, want %v", info.IsHDR10(), c.hdr10)
 			}
-			if (info.HasDV) != c.dv {
+			if info.HasDV != c.dv {
 				t.Errorf("HasDV = %v, want %v", info.HasDV, c.dv)
 			}
 			if info.IsDVP5() != c.dv5 {
